@@ -1,0 +1,27 @@
+{
+  "id": "c-major-five-finger",
+  "title": "C major five-finger",
+  "source": "builtin",
+  "timeSignature": { "num": 4, "den": 4 },
+  "tempoBpm": 80,
+  "keySignature": "C",
+  "difficulty": 1,
+  "measures": [
+    {
+      "n": 1,
+      "events": [
+        { "beat": 1, "durationBeats": 1, "pitches": ["C4"], "hand": "rh", "fingering": [1] },
+        { "beat": 2, "durationBeats": 1, "pitches": ["D4"], "hand": "rh", "fingering": [2] },
+        { "beat": 3, "durationBeats": 1, "pitches": ["E4"], "hand": "rh", "fingering": [3] },
+        { "beat": 4, "durationBeats": 1, "pitches": ["F4"], "hand": "rh", "fingering": [4] }
+      ]
+    },
+    {
+      "n": 2,
+      "events": [
+        { "beat": 1, "durationBeats": 2, "pitches": ["G4"], "hand": "rh", "fingering": [5] },
+        { "beat": 3, "durationBeats": 2, "pitches": ["C4"], "hand": "rh", "fingering": [1] }
+      ]
+    }
+  ]
+}

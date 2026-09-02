@@ -1,0 +1,46 @@
+{
+  "id": "ode-to-joy",
+  "title": "Ode to Joy (simplified)",
+  "source": "builtin",
+  "timeSignature": { "num": 4, "den": 4 },
+  "tempoBpm": 88,
+  "keySignature": "C",
+  "difficulty": 1,
+  "measures": [
+    {
+      "n": 1,
+      "events": [
+        { "beat": 1, "durationBeats": 1, "pitches": ["E4"], "hand": "rh" },
+        { "beat": 2, "durationBeats": 1, "pitches": ["E4"], "hand": "rh" },
+        { "beat": 3, "durationBeats": 1, "pitches": ["F4"], "hand": "rh" },
+        { "beat": 4, "durationBeats": 1, "pitches": ["G4"], "hand": "rh" }
+      ]
+    },
+    {
+      "n": 2,
+      "events": [
+        { "beat": 1, "durationBeats": 1, "pitches": ["G4"], "hand": "rh" },
+        { "beat": 2, "durationBeats": 1, "pitches": ["F4"], "hand": "rh" },
+        { "beat": 3, "durationBeats": 1, "pitches": ["E4"], "hand": "rh" },
+        { "beat": 4, "durationBeats": 1, "pitches": ["D4"], "hand": "rh" }
+      ]
+    },
+    {
+      "n": 3,
+      "events": [
+        { "beat": 1, "durationBeats": 1, "pitches": ["C4"], "hand": "rh" },
+        { "beat": 2, "durationBeats": 1, "pitches": ["C4"], "hand": "rh" },
+        { "beat": 3, "durationBeats": 1, "pitches": ["D4"], "hand": "rh" },
+        { "beat": 4, "durationBeats": 1, "pitches": ["E4"], "hand": "rh" }
+      ]
+    },
+    {
+      "n": 4,
+      "events": [
+        { "beat": 1, "durationBeats": 1.5, "pitches": ["E4"], "hand": "rh" },
+        { "beat": 2.5, "durationBeats": 0.5, "pitches": ["D4"], "hand": "rh" },
+        { "beat": 3, "durationBeats": 2, "pitches": ["D4"], "hand": "rh" }
+      ]
+    }
+  ]
+}

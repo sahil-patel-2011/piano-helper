@@ -1,0 +1,25 @@
+{
+  "id": "hymn-phrase",
+  "title": "Hymn phrase (hands together)",
+  "source": "builtin",
+  "timeSignature": { "num": 4, "den": 4 },
+  "tempoBpm": 76,
+  "keySignature": "C",
+  "difficulty": 3,
+  "measures": [
+    {
+      "n": 1,
+      "events": [
+        { "beat": 1, "durationBeats": 2, "pitches": ["E4", "C3"], "hand": "both" },
+        { "beat": 3, "durationBeats": 2, "pitches": ["G4", "C3"], "hand": "both" }
+      ]
+    },
+    {
+      "n": 2,
+      "events": [
+        { "beat": 1, "durationBeats": 2, "pitches": ["C5", "E3"], "hand": "both" },
+        { "beat": 3, "durationBeats": 2, "pitches": ["G4", "C3"], "hand": "both" }
+      ]
+    }
+  ]
+}

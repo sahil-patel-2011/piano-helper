@@ -1,0 +1,29 @@
+{
+  "id": "scale-g",
+  "title": "G major scale",
+  "source": "builtin",
+  "timeSignature": { "num": 4, "den": 4 },
+  "tempoBpm": 72,
+  "keySignature": "G",
+  "difficulty": 2,
+  "measures": [
+    {
+      "n": 1,
+      "events": [
+        { "beat": 1, "durationBeats": 1, "pitches": ["G4"], "hand": "rh" },
+        { "beat": 2, "durationBeats": 1, "pitches": ["A4"], "hand": "rh" },
+        { "beat": 3, "durationBeats": 1, "pitches": ["B4"], "hand": "rh" },
+        { "beat": 4, "durationBeats": 1, "pitches": ["C5"], "hand": "rh" }
+      ]
+    },
+    {
+      "n": 2,
+      "events": [
+        { "beat": 1, "durationBeats": 1, "pitches": ["D5"], "hand": "rh" },
+        { "beat": 2, "durationBeats": 1, "pitches": ["E5"], "hand": "rh" },
+        { "beat": 3, "durationBeats": 1, "pitches": ["F#5"], "hand": "rh" },
+        { "beat": 4, "durationBeats": 1, "pitches": ["G5"], "hand": "rh" }
+      ]
+    }
+  ]
+}

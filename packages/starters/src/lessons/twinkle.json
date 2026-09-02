@@ -1,0 +1,45 @@
+{
+  "id": "twinkle-v1",
+  "title": "Twinkle, Twinkle, Little Star",
+  "source": "builtin",
+  "timeSignature": { "num": 4, "den": 4 },
+  "tempoBpm": 90,
+  "keySignature": "C",
+  "difficulty": 1,
+  "measures": [
+    {
+      "n": 1,
+      "events": [
+        { "beat": 1, "durationBeats": 1, "pitches": ["C4"], "hand": "rh" },
+        { "beat": 2, "durationBeats": 1, "pitches": ["C4"], "hand": "rh" },
+        { "beat": 3, "durationBeats": 1, "pitches": ["G4"], "hand": "rh" },
+        { "beat": 4, "durationBeats": 1, "pitches": ["G4"], "hand": "rh" }
+      ]
+    },
+    {
+      "n": 2,
+      "events": [
+        { "beat": 1, "durationBeats": 1, "pitches": ["A4"], "hand": "rh" },
+        { "beat": 2, "durationBeats": 1, "pitches": ["A4"], "hand": "rh" },
+        { "beat": 3, "durationBeats": 2, "pitches": ["G4"], "hand": "rh" }
+      ]
+    },
+    {
+      "n": 3,
+      "events": [
+        { "beat": 1, "durationBeats": 1, "pitches": ["F4"], "hand": "rh" },
+        { "beat": 2, "durationBeats": 1, "pitches": ["F4"], "hand": "rh" },
+        { "beat": 3, "durationBeats": 1, "pitches": ["E4"], "hand": "rh" },
+        { "beat": 4, "durationBeats": 1, "pitches": ["E4"], "hand": "rh" }
+      ]
+    },
+    {
+      "n": 4,
+      "events": [
+        { "beat": 1, "durationBeats": 1, "pitches": ["D4"], "hand": "rh" },
+        { "beat": 2, "durationBeats": 1, "pitches": ["D4"], "hand": "rh" },
+        { "beat": 3, "durationBeats": 2, "pitches": ["C4"], "hand": "rh" }
+      ]
+    }
+  ]
+}
