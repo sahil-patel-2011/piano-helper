@@ -1,0 +1,11 @@
+{
+  "name": "Piano Helper",
+  "short_name": "Piano",
+  "description": "Learn piano by keys and finger numbers. Listens through your mic.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0e0d0b",
+  "theme_color": "#0e0d0b",
+  "icons": [{ "src": "/icon.png", "sizes": "1024x1024", "type": "image/png", "purpose": "any" }]
+}

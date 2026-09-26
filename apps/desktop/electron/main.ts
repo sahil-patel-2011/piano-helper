@@ -8,6 +8,7 @@ import {
   copyDesktopAskPrompt,
   getClaudeStatus,
   handoffImportToDesktop,
+  handoffPrompt,
   mcpConfigJson,
   openClaudeDesktop,
   writeMcpConfigs,
@@ -163,7 +164,7 @@ app.whenReady().then(async () => {
   ipcMain.handle("piano:runOmr", async (_e, path: string) => {
     const settings = await getSettings();
     const copied = await copyImport(path);
-    return runOmr(copied.dest, settings.providerId);
+    return runOmr(copied.dest, settings.providerId, settings);
   });
   ipcMain.handle("piano:importBytes", async (_e, payload: { name: string; base64: string }) => {
     if (!payload?.base64) throw new Error("That file was empty.");
@@ -171,7 +172,7 @@ app.whenReady().then(async () => {
     if (buf.length > 20 * 1024 * 1024) throw new Error("That file is too large. Use a photo under 20 MB.");
     const settings = await getSettings();
     const saved = await saveImportBytes(payload.name || "score.jpg", buf);
-    return runOmr(saved.dest, settings.providerId);
+    return runOmr(saved.dest, settings.providerId, settings);
   });
   ipcMain.handle("piano:testProvider", async () => {
     const settings = await getSettings();
@@ -199,19 +200,34 @@ app.whenReady().then(async () => {
     openClaudeDesktop();
     return { ok: true };
   });
-  ipcMain.handle("piano:copyClaudePrompt", () => ({ prompt: copyDesktopAskPrompt() }));
+  ipcMain.handle("piano:copyClaudePrompt", async () => {
+    const settings = await getSettings();
+    return { prompt: copyDesktopAskPrompt(settings) };
+  });
   ipcMain.handle("piano:handoffPath", async (_e, path: string) => {
     const copied = await copyImport(path);
-    await writePendingImport(copied.dest);
-    return handoffImportToDesktop(copied.dest);
+    const settings = await getSettings();
+    const prompt = handoffPrompt(copied.dest, settings);
+    await writePendingImport(copied.dest, {
+      prompt,
+      model: settings.claudeModel,
+      effort: settings.claudeEffort,
+    });
+    return handoffImportToDesktop(copied.dest, settings);
   });
   ipcMain.handle("piano:handoffImport", async (_e, payload: { name: string; base64: string }) => {
     if (!payload?.base64) throw new Error("That file was empty.");
     const buf = Buffer.from(payload.base64, "base64");
     if (buf.length > 20 * 1024 * 1024) throw new Error("That file is too large. Use a photo under 20 MB.");
+    const settings = await getSettings();
     const saved = await saveImportBytes(payload.name || "score.jpg", buf);
-    await writePendingImport(saved.dest);
-    return handoffImportToDesktop(saved.dest);
+    const prompt = handoffPrompt(saved.dest, settings);
+    await writePendingImport(saved.dest, {
+      prompt,
+      model: settings.claudeModel,
+      effort: settings.claudeEffort,
+    });
+    return handoffImportToDesktop(saved.dest, settings);
   });
   ipcMain.handle("piano:addClaudeMcp", async () => {
     const settings = await getSettings();

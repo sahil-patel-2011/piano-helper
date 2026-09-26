@@ -10,6 +10,11 @@ function slug(title: string) {
   return `${base || "imported-score"}-${Date.now().toString(36)}`;
 }
 
+function safeId(value: unknown): string {
+  const s = String(value ?? "").trim();
+  return /^[A-Za-z0-9._-]{1,120}$/.test(s) ? s : "";
+}
+
 function normalizePitch(raw: string): string | null {
   const s = raw
     .trim()
@@ -61,17 +66,25 @@ export function coerceLesson(data: unknown, source: LessonSource): Lesson {
           const pitches = pitchesFrom(er.pitches ?? er.notes ?? er.note);
           if (!pitches.length) return null;
           const hand = er.hand === "lh" || er.hand === "both" ? er.hand : "rh";
+          const fingering = Array.isArray(er.fingering)
+            ? er.fingering
+                .map((n) => Number(n))
+                .filter((n) => n >= 1 && n <= 5)
+                .slice(0, pitches.length)
+            : undefined;
           return {
             beat: Number(er.beat) > 0 ? Number(er.beat) : j + 1,
             durationBeats: Number(er.durationBeats) > 0 ? Number(er.durationBeats) : 1,
             pitches,
             hand,
+            fingering: fingering?.length ? fingering : undefined,
             uncertain: Boolean(er.uncertain),
           };
         })
         .filter((e): e is NonNullable<typeof e> => Boolean(e));
       if (!events.length) return null;
-      return { n: Number(mr.n) > 0 ? Number(mr.n) : i + 1, events };
+      const tip = typeof mr.tip === "string" && mr.tip.trim() ? mr.tip.trim().slice(0, 160) : undefined;
+      return { n: Number(mr.n) > 0 ? Number(mr.n) : i + 1, events, tip };
     })
     .filter((m): m is NonNullable<typeof m> => Boolean(m));
 
@@ -81,7 +94,8 @@ export function coerceLesson(data: unknown, source: LessonSource): Lesson {
 
   const ts = asRecord(raw.timeSignature);
   const lesson = {
-    id: String(raw.id ?? "").trim() || slug(title),
+    // Photos always get a fresh id, so "Ode to Joy" never overwrites or hides a built-in piece.
+    id: source === "photo" || source === "pdf" ? slug(title) : safeId(raw.id) || slug(title),
     title,
     source:
       source === "pdf" ? "pdf" : source === "musicxml" ? "musicxml" : source === "claude" ? "claude" : "photo",
@@ -93,6 +107,7 @@ export function coerceLesson(data: unknown, source: LessonSource): Lesson {
     keySignature: String(raw.keySignature ?? "C") || "C",
     difficulty: Math.min(5, Math.max(1, Number(raw.difficulty) || 1)),
     measures,
+    summary: typeof raw.summary === "string" && raw.summary.trim() ? raw.summary.trim().slice(0, 400) : undefined,
   };
   return LessonSchema.parse(lesson);
 }

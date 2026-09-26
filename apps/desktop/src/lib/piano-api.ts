@@ -177,8 +177,167 @@ function browserFallback(): PianoAPI {
   };
 }
 
+// ---------------------------------------------------------------- studio server
+// When the page is served by `piano-helper studio`, storage and score reading go
+// to that computer. The device profile (mic calibration) stays in this browser,
+// because a phone mic and a laptop mic hear the same piano differently.
+
+declare global {
+  interface Window {
+    __PH_STUDIO__?: { studio: true; key: string | null };
+  }
+}
+
+export type StudioEngine = { id: "claude" | "codex"; label: string; path: string | null; found: boolean };
+export type StudioStatus = {
+  engines: StudioEngine[];
+  active: "claude" | "codex" | null;
+  preferred: "auto" | "claude" | "codex";
+  dataDir: string;
+  lan: string[];
+};
+
+export class StudioError extends Error {
+  constructor(
+    message: string,
+    public code: string,
+  ) {
+    super(message);
+  }
+}
+
+export function isStudio() {
+  return !window.piano && Boolean(window.__PH_STUDIO__?.studio);
+}
+
+let cachedKey: string | null = null;
+
+function studioKey(): string {
+  if (cachedKey !== null) return cachedKey;
+  const url = new URL(window.location.href);
+  const fromUrl = url.searchParams.get("key");
+  if (fromUrl) {
+    try {
+      localStorage.setItem("ph.studioKey", fromUrl);
+    } catch {
+      /* private mode: key lives for this tab only */
+    }
+    url.searchParams.delete("key");
+    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+  }
+  let saved: string | null = null;
+  try {
+    saved = localStorage.getItem("ph.studioKey");
+  } catch {
+    /* ignore */
+  }
+  cachedKey = window.__PH_STUDIO__?.key || fromUrl || saved || "";
+  return cachedKey;
+}
+
+async function studioFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const res = await fetch(path, {
+    ...init,
+    headers: { "x-piano-key": studioKey(), ...(init.body && !(init.body instanceof Blob) ? { "Content-Type": "application/json" } : {}), ...init.headers },
+  });
+  const json = (await res.json().catch(() => ({}))) as T & { error?: { code: string; message: string } };
+  if (!res.ok) throw new StudioError(json.error?.message ?? `Studio error ${res.status}`, json.error?.code ?? "ERROR");
+  return json;
+}
+
+export function studioStatus() {
+  return studioFetch<StudioStatus>("/api/status");
+}
+
+export async function studioPaired(): Promise<boolean> {
+  const r = await studioFetch<{ paired: boolean }>("/api/ping");
+  return r.paired;
+}
+
+/** Uploads a score photo and waits while Claude Code / Codex on the studio computer reads it. */
+export async function studioImport(file: Blob, name: string, onTick: (seconds: number) => void): Promise<Lesson> {
+  const started = await studioFetch<{ id: string }>(`/api/import?name=${encodeURIComponent(name)}`, {
+    method: "POST",
+    body: file,
+    headers: { "Content-Type": "application/octet-stream" },
+  });
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 1500));
+    const job = await studioFetch<{ status: string; lesson?: Lesson; error?: string; elapsedMs: number }>(`/api/jobs/${started.id}`);
+    onTick(Math.round(job.elapsedMs / 1000));
+    if (job.status === "done" && job.lesson) return LessonSchema.parse(job.lesson);
+    if (job.status === "error") throw new StudioError(job.error ?? "Could not read that page.", "IMPORT_FAILED");
+  }
+}
+
+function studioApi(): PianoAPI {
+  const local = browserFallback();
+  let liveTimer = 0;
+  let pendingLive: LiveState | null = null;
+  const state = () =>
+    studioFetch<{
+      settings: unknown;
+      progress: { stats: unknown; measures: MeasureMasteryMap };
+    }>("/api/state");
+
+  return {
+    ...local,
+    async getSettings() {
+      return AppSettingsSchema.parse((await state()).settings);
+    },
+    async saveSettings(s) {
+      await studioFetch("/api/settings", { method: "PUT", body: JSON.stringify(s) });
+    },
+    async getProgress() {
+      const { progress } = await state();
+      return { stats: ProgressStatsSchema.parse(progress.stats), measures: progress.measures ?? {} };
+    },
+    async saveProgress(stats, measures) {
+      await studioFetch("/api/progress", { method: "PUT", body: JSON.stringify({ stats, measures }) });
+    },
+    async saveLesson(lesson) {
+      await studioFetch("/api/lessons", { method: "PUT", body: JSON.stringify(LessonSchema.parse(lesson)) });
+    },
+    async listLibrary() {
+      return (await studioFetch<{ items: Awaited<ReturnType<PianoAPI["listLibrary"]>> }>("/api/library")).items;
+    },
+    async loadLesson(id) {
+      try {
+        return LessonSchema.parse(await studioFetch(`/api/lessons/${encodeURIComponent(id)}`));
+      } catch {
+        return null;
+      }
+    },
+    pushLive(live) {
+      // Throttled so Claude's app_status / get_expected tools see the current note without flooding Wi-Fi.
+      pendingLive = live;
+      if (liveTimer) return;
+      liveTimer = window.setTimeout(() => {
+        liveTimer = 0;
+        const body = JSON.stringify(pendingLive);
+        void fetch("/api/live", { method: "POST", body, headers: { "x-piano-key": studioKey(), "Content-Type": "application/json" } }).catch(() => undefined);
+      }, 250);
+    },
+    onCommand(cb) {
+      const source = new EventSource(`/api/events?key=${encodeURIComponent(studioKey())}`);
+      source.onmessage = (e) => {
+        try {
+          cb(JSON.parse(e.data) as Record<string, unknown>);
+        } catch {
+          /* ignore malformed */
+        }
+      };
+      return () => source.close();
+    },
+  };
+}
+
+let singleton: PianoAPI | null = null;
+
 export function getPiano(): PianoAPI {
-  return window.piano ?? browserFallback();
+  if (window.piano) return window.piano;
+  singleton ??= isStudio() ? studioApi() : browserFallback();
+  return singleton;
 }
 
 export function isDesktopApp() {

@@ -1,10 +1,10 @@
 import { useAppStore, type Screen } from "../../store/app-store";
 
 const PRIMARY: { id: Screen; label: string }[] = [
-  { id: "home", label: "Studio" },
+  { id: "home", label: "Home" },
   { id: "library", label: "Library" },
   { id: "practice", label: "Practice" },
-  { id: "import", label: "Import" },
+  { id: "import", label: "Snap" },
 ];
 
 const DRILLS: { id: Screen; label: string }[] = [
@@ -17,11 +17,12 @@ export function Sidebar() {
   const screen = useAppStore((s) => s.screen);
   const setScreen = useAppStore((s) => s.setScreen);
   const lesson = useAppStore((s) => s.lesson);
+  const simple = useAppStore((s) => s.settings.simpleView);
 
   return (
     <aside className="sidebar">
       <nav className="side-nav">
-        {PRIMARY.map((item) => (
+        {PRIMARY.filter((item) => !simple || item.id !== "library").map((item) => (
           <button
             key={item.id}
             type="button"
@@ -31,8 +32,8 @@ export function Sidebar() {
             {item.label}
           </button>
         ))}
-        <div className="side-label">Drills</div>
-        {DRILLS.map((item) => (
+        {!simple && <div className="side-label">Drills</div>}
+        {!simple && DRILLS.map((item) => (
           <button key={item.id} type="button" className={screen === item.id ? "active" : ""} onClick={() => setScreen(item.id)}>
             {item.label}
           </button>

@@ -66,7 +66,7 @@ export const useAppStore = create<AppState>((set) => ({
   measures: {},
   library: [],
   lesson: null,
-  mode: "wait",
+  mode: "learn",
   hands: "all",
   loopMeasures: null,
   toast: null,

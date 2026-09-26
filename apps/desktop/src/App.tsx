@@ -3,7 +3,7 @@ import { lessonHasUncertain } from "@piano-helper/shared";
 import { Sidebar } from "./components/chrome/Sidebar";
 import { Titlebar } from "./components/chrome/Titlebar";
 import { useAppStore } from "./store/app-store";
-import { getPiano, isDesktopApp } from "./lib/piano-api";
+import { getPiano, isDesktopApp, isStudio } from "./lib/piano-api";
 import { BootScreen } from "./screens/BootScreen";
 import { OnboardingScreen } from "./screens/OnboardingScreen";
 import { HomeScreen } from "./screens/HomeScreen";
@@ -28,6 +28,7 @@ export function App() {
   const setLoopMeasures = useAppStore((s) => s.setLoopMeasures);
   const setSettings = useAppStore((s) => s.setSettings);
   const settings = useAppStore((s) => s.settings);
+  const setLibrary = useAppStore((s) => s.setLibrary);
 
   useEffect(() => {
     return getPiano().onCommand(async (cmd) => {
@@ -40,7 +41,7 @@ export function App() {
           return;
         }
         setLesson(lesson);
-        if (cmd.mode === "wait" || cmd.mode === "slow" || cmd.mode === "loop" || cmd.mode === "play") {
+        if (cmd.mode === "learn" || cmd.mode === "wait" || cmd.mode === "slow" || cmd.mode === "loop" || cmd.mode === "play") {
           setMode(cmd.mode);
         }
         if (Array.isArray(cmd.measures) && cmd.measures.length === 2) {
@@ -52,6 +53,7 @@ export function App() {
         setScreen("practice");
       }
       if (cmd.type === "stop") setScreen("home");
+      if (cmd.type === "library") setLibrary(await getPiano().listLibrary());
       if (cmd.type === "mixer" && cmd.patch && typeof cmd.patch === "object") {
         const mixer = { ...settings.mixer, ...(cmd.patch as object) };
         const next = { ...settings, mixer };
@@ -59,11 +61,15 @@ export function App() {
         await getPiano().saveSettings(next);
       }
       if (cmd.type === "imported" && cmd.lesson) {
+        setLibrary(await getPiano().listLibrary());
         setLesson(cmd.lesson as never);
-        setScreen("editor");
+        if (useAppStore.getState().settings.simpleView) {
+          setMode("learn");
+          setScreen("practice");
+        } else setScreen("editor");
       }
     });
-  }, [setHands, setLesson, setLoopMeasures, setMode, setScreen, setSettings, settings]);
+  }, [setHands, setLesson, setLibrary, setLoopMeasures, setMode, setScreen, setSettings, settings]);
 
   useEffect(() => {
     if (!toast) return;
@@ -74,8 +80,8 @@ export function App() {
   const hideSidebar = screen === "boot" || screen === "onboarding";
 
   return (
-    <div className={`app${isDesktopApp() ? " is-desktop" : " is-web"}`}>
-      <Titlebar />
+    <div className={`app${isDesktopApp() ? " is-desktop" : " is-web"}${isStudio() ? " is-studio" : ""} screen-${screen}`}>
+      {isDesktopApp() && <Titlebar />}
       <div className="shell">
         {!hideSidebar && <Sidebar />}
         <main className="workspace">

@@ -3,9 +3,11 @@ import react from "@vitejs/plugin-react";
 import electron from "vite-plugin-electron";
 import renderer from "vite-plugin-electron-renderer";
 
-const skipElectron = process.env.PIANO_SKIP_ELECTRON === "1";
-
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  // `--mode studio` builds the plain web app served by `piano-helper studio` to phones and browsers.
+  const skipElectron = process.env.PIANO_SKIP_ELECTRON === "1" || mode === "studio";
+  return {
+  base: mode === "studio" ? "/" : undefined,
   plugins: [
     react(),
     ...(!skipElectron
@@ -53,4 +55,5 @@ export default defineConfig({
       ignored: ["**/*.ico", "**/assets/**"],
     },
   },
+};
 });

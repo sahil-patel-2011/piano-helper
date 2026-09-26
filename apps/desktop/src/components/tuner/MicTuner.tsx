@@ -1,4 +1,5 @@
 import type { TunerReading } from "../../audio/capture";
+import { isDesktopApp } from "../../lib/piano-api";
 
 type Props = {
   tuner: TunerReading;
@@ -12,7 +13,7 @@ export function MicTuner({ tuner, targetPitch, targetMidi, onEnable }: Props) {
     return (
       <div className="tuner card">
         <div className="muted">Microphone</div>
-        <p>Windows is blocking the mic.</p>
+        <p>{isDesktopApp() ? "Windows is blocking the mic." : "The browser is blocking the mic. Allow microphone for this site, then tap below."}</p>
         <button className="primary" onClick={() => void onEnable?.()}>
           Enable microphone
         </button>

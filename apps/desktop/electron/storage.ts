@@ -184,10 +184,13 @@ export async function saveImportBytes(name: string, bytes: Buffer): Promise<{ id
 export type PendingImport = {
   path: string;
   createdAt: string;
+  prompt?: string;
+  model?: string;
+  effort?: string;
 };
 
-export async function writePendingImport(path: string): Promise<PendingImport> {
-  const pending: PendingImport = { path, createdAt: new Date().toISOString() };
+export async function writePendingImport(path: string, extra: Partial<PendingImport> = {}): Promise<PendingImport> {
+  const pending: PendingImport = { path, createdAt: new Date().toISOString(), ...extra };
   await writeFile(filePath("pending-import.json"), JSON.stringify(pending, null, 2), "utf8");
   return pending;
 }
