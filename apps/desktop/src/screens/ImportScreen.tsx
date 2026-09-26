@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { COPY, lessonHasUncertain, type Lesson } from "@piano-helper/shared";
-import { getPiano } from "../lib/piano-api";
+import { COPY, type Lesson } from "@piano-helper/shared";
+import { getPiano, isStudio, studioImport, studioStatus } from "../lib/piano-api";
 import { useAppStore } from "../store/app-store";
 
 function fileToPayload(file: File): Promise<{ name: string; base64: string }> {
@@ -17,17 +17,46 @@ function fileToPayload(file: File): Promise<{ name: string; base64: string }> {
   });
 }
 
+/** Phone cameras shoot 12+ MP. The reader only needs ~2400px on the long side, and uploads 5x faster. */
+async function shrinkPhoto(file: File): Promise<{ blob: Blob; name: string }> {
+  if (!file.type.startsWith("image/") || file.type === "image/gif") return { blob: file, name: file.name || "score.jpg" };
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, 2400 / Math.max(bitmap.width, bitmap.height));
+    if (scale === 1 && file.size < 4_000_000) return { blob: file, name: file.name || "score.jpg" };
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    canvas.getContext("2d")?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/jpeg", 0.9));
+    if (!blob) return { blob: file, name: file.name || "score.jpg" };
+    return { blob, name: (file.name || "score").replace(/\.[^.]+$/, "") + ".jpg" };
+  } catch {
+    return { blob: file, name: file.name || "score.jpg" };
+  }
+}
+
 export function ImportScreen() {
   const setLesson = useAppStore((s) => s.setLesson);
   const setScreen = useAppStore((s) => s.setScreen);
   const showToast = useAppStore((s) => s.showToast);
   const videoRef = useRef<HTMLVideoElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const studio = isStudio();
+  const [readerLabel, setReaderLabel] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [camOn, setCamOn] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+
+  useEffect(() => {
+    if (!studio) return;
+    void studioStatus()
+      .then((st) => setReaderLabel(st.engines.find((e) => e.id === st.active)?.label ?? ""))
+      .catch(() => setReaderLabel(""));
+  }, [studio]);
 
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
@@ -40,11 +69,24 @@ export function ImportScreen() {
   }, []);
 
   async function finish(lesson: Lesson) {
-    await getPiano().saveLesson(lesson);
+    const api = getPiano();
+    await api.saveLesson(lesson);
+    useAppStore.getState().setLibrary(await api.listLibrary());
+    const settings = useAppStore.getState().settings;
+    const next = { ...settings, lastPieceId: lesson.id };
+    useAppStore.getState().setSettings(next);
+    void api.saveSettings(next);
     setLesson(lesson);
-    showToast(`Imported ${lesson.title}`);
-    if (lessonHasUncertain(lesson)) setScreen("editor");
-    else setScreen("practice");
+    const unsure = lesson.measures.flatMap((m) => m.events).filter((e) => e.uncertain).length;
+    // Someone who doesn't read music can't fix notes in an editor; they can check by ear with "Hear it".
+    if (unsure && !settings.simpleView) {
+      showToast(`Imported ${lesson.title}. Check the notes marked unsure.`);
+      setScreen("editor");
+      return;
+    }
+    showToast(unsure ? `Ready: ${lesson.title}. ${unsure} note${unsure > 1 ? "s" : ""} the AI wasn't sure of — use Hear it if something sounds off.` : `Ready: ${lesson.title}`);
+    useAppStore.getState().setMode("learn");
+    setScreen("practice");
   }
 
   async function ingestFile(file: File) {
@@ -61,6 +103,16 @@ export function ImportScreen() {
         const text = await file.text();
         const { parseMusicXml } = await import("../../electron/musicxml");
         await finish(parseMusicXml(text, file.name));
+        return;
+      }
+      if (studio) {
+        const { blob, name } = await shrinkPhoto(file);
+        const who = readerLabel || "The AI";
+        setStatus(`${who} is reading the notes on your computer…`);
+        const lesson = await studioImport(blob, name, (sec) =>
+          setStatus(`${who} is reading the notes… ${sec}s (usually 30–90s)`),
+        );
+        await finish(lesson);
         return;
       }
       const payload = await fileToPayload(file);
@@ -142,11 +194,27 @@ export function ImportScreen() {
           <div>
             <h1>Import music</h1>
             <p className="muted">
-              Drop a photo of a page. Claude Desktop (the app you are signed into) reads the notes — no API
-              credits.
+              {studio
+                ? `Snap a photo of the page. ${readerLabel || "Claude Code or Codex"} on your computer turns it into keys and finger numbers — on your subscription, no API credits.`
+                : "Drop a photo of a page. Claude Desktop (the app you are signed into) reads the notes — no API credits."}
             </p>
+            {studio && readerLabel === "" && (
+              <p className="warn-line">No reader found on the studio computer. Install Claude Code or Codex there and sign in once.</p>
+            )}
           </div>
         </div>
+        <input
+          ref={cameraRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          hidden
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            if (file) void ingestFile(file);
+          }}
+        />
         <input
           ref={inputRef}
           type="file"
@@ -181,34 +249,55 @@ export function ImportScreen() {
             <p className="muted">
               {busy
                 ? status
-                : "Or click to choose a file · Ctrl+V to paste · PNG, JPG, WebP, PDF, MusicXML"}
+                : studio
+                  ? "Or tap to choose · drop a file · paste · JPG, PNG, PDF, MusicXML"
+                  : "Or click to choose a file · Ctrl+V to paste · PNG, JPG, WebP, PDF, MusicXML"}
             </p>
           </div>
         </div>
-        <div className="row">
-          <button className="primary" disabled={busy} onClick={() => inputRef.current?.click()}>
-            Choose photo
-          </button>
-          <button
-            disabled={busy}
-            onClick={async () => {
-              const path = await getPiano().pickImportFile();
-              if (path) await ingestPath(path);
-            }}
-          >
-            Browse disk
-          </button>
-          <button disabled={busy} onClick={() => void startCam()}>
-            Open camera
-          </button>
-          <button className="primary" disabled={!camOn || busy} onClick={() => void snap()}>
-            Snap page
-          </button>
-        </div>
-        <video
-          ref={videoRef}
-          style={{ width: "100%", maxWidth: 640, borderRadius: 8, background: "#000", minHeight: camOn ? 240 : 0 }}
-        />
+        {studio ? (
+          <div className="row">
+            <button className="primary big" disabled={busy} onClick={() => cameraRef.current?.click()}>
+              Take photo
+            </button>
+            <button disabled={busy} onClick={() => inputRef.current?.click()}>
+              Choose from photos
+            </button>
+          </div>
+        ) : (
+          <div className="row">
+            <button className="primary" disabled={busy} onClick={() => inputRef.current?.click()}>
+              Choose photo
+            </button>
+            <button
+              disabled={busy}
+              onClick={async () => {
+                const path = await getPiano().pickImportFile();
+                if (path) await ingestPath(path);
+              }}
+            >
+              Browse disk
+            </button>
+            <button disabled={busy} onClick={() => void startCam()}>
+              Open camera
+            </button>
+            <button className="primary" disabled={!camOn || busy} onClick={() => void snap()}>
+              Snap page
+            </button>
+          </div>
+        )}
+        {studio && (
+          <p className="muted">
+            Tips: fill the frame with one or two lines of music, flat and well lit. Anything the reader is unsure of
+            opens in the editor so you can fix it before practising.
+          </p>
+        )}
+        {!studio && (
+          <video
+            ref={videoRef}
+            style={{ width: "100%", maxWidth: 640, borderRadius: 8, background: "#000", minHeight: camOn ? 240 : 0 }}
+          />
+        )}
       </div>
     </div>
   );

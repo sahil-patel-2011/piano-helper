@@ -4,7 +4,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { OMR_PROMPT } from "@piano-helper/shared";
+import { composeClaudePrompt, type AppSettings } from "@piano-helper/shared";
 import type { ClaudeStatus } from "./claude-types.js";
 
 export type { ClaudeStatus };
@@ -227,31 +227,23 @@ async function desktopLooksSignedIn(): Promise<boolean> {
   return desktopProcessRunning();
 }
 
-export function handoffPrompt(filePath: string) {
-  return `Piano Helper is open and waiting.
-
-Read this piano score photo and send the notes into Piano Helper using the piano-helper MCP tools.
-
-Score file:
-${filePath}
-
-Steps:
-1. Call pending_import (it has the JSON schema).
-2. Open the score file and transcribe the notes you can see.
-3. Call push_lesson with that lesson JSON.
-
-Keep Piano Helper open. Do not ask me for an API key.`;
+export function handoffPrompt(filePath: string, settings?: Partial<AppSettings>) {
+  return composeClaudePrompt({
+    extraPrompt: settings?.extraPrompt,
+    model: settings?.claudeModel,
+    effort: settings?.claudeEffort,
+    filePath,
+    task: "Open the score file. Transcribe the notes and assign fingering that a human hand can play. Then call pending_import if you need the schema, and push_lesson with the JSON.",
+  });
 }
 
-export function desktopAskPrompt() {
-  return `Piano Helper is running on this PC.
-
-Use the piano-helper MCP tools:
-- pending_import — latest score I dropped in Piano Helper, plus the JSON schema
-- push_lesson — send transcribed notes into the app
-- list_library / open_piece / app_status — control practice
-
-If I attach a score photo here, read it yourself and call push_lesson. No API key.`;
+export function desktopAskPrompt(settings?: Partial<AppSettings>) {
+  return composeClaudePrompt({
+    extraPrompt: settings?.extraPrompt,
+    model: settings?.claudeModel,
+    effort: settings?.claudeEffort,
+    task: "Piano Helper is running. Use piano-helper MCP: pending_import, push_lesson, list_library, open_piece, app_status. If I attach a score, read it and push_lesson.",
+  });
 }
 
 export async function getClaudeStatus(): Promise<ClaudeStatus> {
@@ -399,20 +391,20 @@ export async function connectClaudeCode(): Promise<{ ok: boolean; message: strin
   };
 }
 
-export async function handoffImportToDesktop(filePath: string) {
-  const prompt = handoffPrompt(filePath);
+export async function handoffImportToDesktop(filePath: string, settings?: Partial<AppSettings>) {
+  const prompt = handoffPrompt(filePath, settings);
   clipboard.writeText(prompt);
   openClaudeDesktop();
   return {
     ok: true,
     path: filePath,
     prompt,
-    message: "Claude Desktop is opening. Press Ctrl+V in a new chat and send. Keep Piano Helper open.",
+    message: `Claude Desktop is opening on ${settings?.claudeModel ?? "opus"} · ${settings?.claudeEffort ?? "high"}. Press Ctrl+V, pick that model, and send.`,
   };
 }
 
-export function copyDesktopAskPrompt() {
-  const prompt = desktopAskPrompt();
+export function copyDesktopAskPrompt(settings?: Partial<AppSettings>) {
+  const prompt = desktopAskPrompt(settings);
   clipboard.writeText(prompt);
   return prompt;
 }
@@ -421,6 +413,10 @@ export function mcpConfigJson() {
   return JSON.stringify({ mcpServers: { "piano-helper": mcpServerEntry() } }, null, 2);
 }
 
-export function omrPromptText() {
-  return OMR_PROMPT;
+export function omrPromptText(settings?: Partial<AppSettings>) {
+  return composeClaudePrompt({
+    extraPrompt: settings?.extraPrompt,
+    model: settings?.claudeModel,
+    effort: settings?.claudeEffort,
+  });
 }

@@ -9,9 +9,9 @@ import {
   IMPORT_EXTENSIONS,
   ImportBodySchema,
   MixerPatchSchema,
-  OMR_PROMPT,
   OpenPieceBodySchema,
   coerceLesson,
+  composeClaudePrompt,
   type BridgeDiscovery,
 } from "@piano-helper/shared";
 import { getLive, isConnected, jobs, sendCommand, setLive, touchConnected } from "./app-state.js";
@@ -91,11 +91,19 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     }
     if (req.method === "GET" && url.pathname === "/v1/pending-import") {
       const pending = await getPendingImport();
+      const settings = await getSettings();
       json(res, 200, {
         pending,
-        schema: OMR_PROMPT,
+        model: settings.claudeModel,
+        effort: settings.claudeEffort,
+        prompt: pending?.prompt ?? composeClaudePrompt({
+          extraPrompt: settings.extraPrompt,
+          model: settings.claudeModel,
+          effort: settings.claudeEffort,
+          filePath: pending?.path,
+        }),
         hint: pending
-          ? "Read the score at pending.path, then call push_lesson with lesson JSON."
+          ? "Read the score at pending.path, follow prompt, then call push_lesson. Include fingering."
           : "No score is waiting. Ask the user to drop a photo in Piano Helper, or attach one here and push_lesson.",
       });
       return;
@@ -142,7 +150,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       void (async () => {
         try {
           const copied = await copyImport(path);
-          const lesson = await runOmr(copied.dest, settings.providerId);
+          const lesson = await runOmr(copied.dest, settings.providerId, settings);
           await saveLesson(lesson);
           jobs.set(id, { id, status: "done", lesson });
           sendCommand({ type: "imported", lesson });

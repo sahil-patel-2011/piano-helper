@@ -16,6 +16,8 @@ export const ProviderIdSchema = z.enum([
   "openrouter",
 ]);
 
+export const OmrEngineSchema = z.enum(["auto", "claude", "codex"]);
+
 export const AppSettingsSchema = z.object({
   mixer: MixerSchema.default({}),
   quiet: z.boolean().default(false),
@@ -29,8 +31,18 @@ export const AppSettingsSchema = z.object({
   syncStats: z.boolean().default(false),
   onboardingComplete: z.boolean().default(false),
   placementComplete: z.boolean().default(false),
+  claudeModel: z.string().default("opus"),
+  claudeEffort: z.enum(["low", "medium", "high", "xhigh", "max"]).default("high"),
+  extraPrompt: z.string().max(4000).default(""),
+  /** Which terminal AI reads score photos in `piano-helper studio`. */
+  omrEngine: OmrEngineSchema.default("auto"),
+  /** Blank = Codex's configured default model. */
+  codexModel: z.string().max(80).default(""),
+  /** Keys + finger numbers only: hides the staff and letter names so no note reading is needed. */
+  simpleView: z.boolean().default(true),
 });
 
+export type OmrEngine = z.infer<typeof OmrEngineSchema>;
 export type Mixer = z.infer<typeof MixerSchema>;
 export type ProviderId = z.infer<typeof ProviderIdSchema>;
 export type AppSettings = z.infer<typeof AppSettingsSchema>;

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { api, BridgeError } from "./client.js";
 import { startMcp } from "./mcp.js";
+import { runStudio } from "./studio/cli.js";
 
 function arg(name: string, fallback?: string): string | undefined {
   const i = process.argv.indexOf(name);
@@ -16,6 +17,10 @@ async function main() {
   const cmd = process.argv[2] ?? "status";
   if (cmd === "mcp") {
     await startMcp();
+    return;
+  }
+  if (cmd === "studio" || cmd === "serve") {
+    await runStudio(process.argv.slice(3));
     return;
   }
 
@@ -62,7 +67,7 @@ async function main() {
         });
         break;
       default:
-        console.error("Unknown command. Try: status | library | import | open | expected | session | stop | mixer | mcp");
+        console.error("Unknown command. Try: studio | status | library | import | open | expected | session | stop | mixer | mcp");
         process.exit(1);
     }
     if (asJson) {

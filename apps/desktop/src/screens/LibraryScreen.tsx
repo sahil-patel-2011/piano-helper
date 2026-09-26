@@ -27,10 +27,14 @@ export function LibraryScreen() {
           {items.map((item) => {
             const dots = measures[item.id] ?? {};
             const full = STARTERS.find((s) => s.id === item.id);
-            const preview = full?.measures
-              .flatMap((m) => m.events.flatMap((e) => e.pitches))
-              .slice(0, 8)
-              .join("  →  ");
+            const events = full?.measures.flatMap((m) => m.events).slice(0, 8);
+            // Simple view previews the finger pattern, which is what the hand actually memorises.
+            const preview = settings.simpleView
+              ? events
+                  ?.map((e) => (e.fingering?.length ? `${e.hand === "lh" ? "L" : "R"}${e.fingering.join("+")}` : ""))
+                  .filter(Boolean)
+                  .join("  ")
+              : events?.flatMap((e) => e.pitches).join("  →  ");
             return (
               <div key={item.id} className="card piece-card">
                 <div className="serif piece-title">{item.title}</div>

@@ -27,6 +27,15 @@ export type MicHandle = {
   resume: () => Promise<void>;
 };
 
+// A0 is 27.5 Hz: one cycle is 36 ms, so the deepest keys need the long window.
+const LONG = 4096;
+const SHORT = 2048;
+const MIN_HZ = 26;
+const MAX_HZ = 4400;
+/** After a note starts, wait this long before a louder re-strike of the same key can count. */
+const RESTRIKE_GUARD_MS = 110;
+const RESTRIKE_SETTLE_MS = 35;
+
 export async function startMic(
   profile: DeviceProfile | null,
   onNote: (note: HeardNote) => void,
@@ -41,16 +50,19 @@ export async function startMic(
       channelCount: 1,
     },
   });
-  const context = new AudioContext({ sampleRate: 48000 });
+  // Let the device pick its native rate: forcing 48 kHz breaks Firefox and some phones.
+  const context = new AudioContext();
   if (context.state === "suspended") await context.resume().catch(() => undefined);
   const source = context.createMediaStreamSource(stream);
   const analyser = context.createAnalyser();
-  analyser.fftSize = 2048;
+  analyser.fftSize = LONG;
   analyser.smoothingTimeConstant = 0;
   source.connect(analyser);
 
-  const buffer = new Float32Array(analyser.fftSize);
-  const detector = PitchDetector.forFloat32Array(analyser.fftSize);
+  const buffer = new Float32Array(LONG);
+  const recent = buffer.subarray(LONG - SHORT);
+  const shortDetector = PitchDetector.forFloat32Array(SHORT);
+  const longDetector = PitchDetector.forFloat32Array(LONG);
   const offset = profile?.centsOffset ?? 0;
   const threshold = profile?.yinThreshold ?? 0.18;
   const minHit = profile?.minHitRms ?? 0.012;
@@ -60,6 +72,9 @@ export async function startMic(
   let lastMidi: number | null = null;
   let agree = 0;
   let held = false;
+  let onsetAt = 0;
+  let rearmedAt = 0;
+  let trough = Infinity;
   let timer = 0;
   let alive = true;
 
@@ -76,9 +91,22 @@ export async function startMic(
       return;
     }
     analyser.getFloatTimeDomainData(buffer);
+    // Loudness of the newest 43 ms only, so a fresh strike shows up immediately.
     let sum = 0;
-    for (const s of buffer) sum += s * s;
-    const rms = Math.sqrt(sum / buffer.length);
+    for (const s of recent) sum += s * s;
+    const rms = Math.sqrt(sum / recent.length);
+
+    // Same key struck again while it still rings: the level dips, then jumps.
+    // Re-arm so repeated notes (E-E in Ode to Joy) each count.
+    if (held && performance.now() - onsetAt > RESTRIKE_GUARD_MS) {
+      trough = Math.min(trough, rms);
+      if (rms > trough * 1.6 && rms - trough > minHit * 0.5) {
+        held = false;
+        agree = 0;
+        lastMidi = null;
+        rearmedAt = performance.now();
+      }
+    }
 
     if (noiseSamples < 40 && rms < 0.02) {
       noiseFloor = (noiseFloor * noiseSamples + rms) / (noiseSamples + 1);
@@ -94,8 +122,13 @@ export async function startMic(
       return;
     }
 
-    const [hz, clarity] = detector.findPitch(buffer, context.sampleRate);
-    if (!hz || hz < 55 || hz > 2000 || clarity < 1 - threshold) {
+    let [hz, clarity] = shortDetector.findPitch(recent, context.sampleRate);
+    if (!hz || clarity < 1 - threshold) {
+      // Nothing clear in the short window: maybe a bass note with too few cycles. Try the long one.
+      const [lhz, lclarity] = longDetector.findPitch(buffer, context.sampleRate);
+      if (lhz && lhz < 140 && lclarity >= clarity) [hz, clarity] = [lhz, lclarity];
+    }
+    if (!hz || hz < MIN_HZ || hz > MAX_HZ || clarity < 1 - threshold) {
       publish({ rms, hz: null, midi: null, pitch: null, cents: null, clarity, status: "listening" });
       timer = window.setTimeout(tick, 16);
       return;
@@ -122,8 +155,13 @@ export async function startMic(
       held = false;
     }
     const need = clarity > 0.92 ? 2 : 3;
+    // Right after a new strike the 43 ms window still holds mostly the previous key.
+    // Wait for it to fill with the new sound before naming the note.
+    if (performance.now() - rearmedAt < RESTRIKE_SETTLE_MS) agree = Math.min(agree, 1);
     if (agree >= need && !held && rms >= minHit) {
       held = true;
+      onsetAt = performance.now();
+      trough = Infinity;
       onNote({
         midi,
         centsError: centsErrorHz(hz, midi, offset),

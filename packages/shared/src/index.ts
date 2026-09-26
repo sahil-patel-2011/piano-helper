@@ -9,3 +9,4 @@ export * from "./omr-prompt.js";
 export * from "./omr-coerce.js";
 export * from "./errors.js";
 export * from "./fingering.js";
+export * from "./claude-models.js";

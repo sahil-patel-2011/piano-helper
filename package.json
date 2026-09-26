@@ -2,7 +2,7 @@
   "name": "piano-helper",
   "private": true,
   "version": "0.1.0",
-  "description": "Piano Helper — local adult piano studio",
+  "description": "Piano Helper \u2014 local adult piano studio",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -14,11 +14,14 @@
   ],
   "scripts": {
     "dev": "npm run dev -w @piano-helper/desktop",
+    "studio": "npm run build:app && npm run piano-helper -- studio",
+    "studio:dev": "npm run piano-helper -- studio",
     "dev:web": "npm run dev -w @piano-helper/web",
     "build": "npm run build -w @piano-helper/shared && npm run build -w @piano-helper/starters && npm run build -w @piano-helper/bridge && npm run build -w @piano-helper/desktop && npm run build -w @piano-helper/web",
     "build:desktop": "npm run build -w @piano-helper/desktop",
+    "build:app": "npm run build:app -w @piano-helper/desktop",
     "build:web": "npm run build -w @piano-helper/web",
-    "test": "npm run test -w @piano-helper/shared",
+    "test": "npm run test -w @piano-helper/shared && npm run test -w @piano-helper/bridge",
     "piano-helper": "npm run start -w @piano-helper/bridge"
   },
   "allowScripts": {

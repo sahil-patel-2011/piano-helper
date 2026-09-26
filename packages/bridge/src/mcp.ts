@@ -48,7 +48,7 @@ export async function startMcp() {
     {
       id: z.string().optional(),
       title: z.string().optional(),
-      mode: z.enum(["wait", "slow", "loop", "play"]).optional(),
+      mode: z.enum(["learn", "wait", "slow", "loop", "play"]).optional(),
       measures: z.tuple([z.number(), z.number()]).optional(),
       tempo: z.number().optional(),
       hands: z.enum(["rh", "lh", "both", "all"]).optional(),

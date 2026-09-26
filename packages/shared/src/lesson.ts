@@ -3,7 +3,7 @@ import { pitchToMidi } from "./pitch.js";
 
 export const LessonSourceSchema = z.enum(["builtin", "photo", "pdf", "musicxml", "claude"]);
 export const HandSchema = z.enum(["rh", "lh", "both"]);
-export const PracticeModeSchema = z.enum(["wait", "slow", "loop", "play"]);
+export const PracticeModeSchema = z.enum(["wait", "slow", "loop", "play", "learn"]);
 
 export const LessonEventSchema = z.object({
   beat: z.number().positive(),
@@ -18,6 +18,8 @@ export const LessonEventSchema = z.object({
 export const LessonMeasureSchema = z.object({
   n: z.number().int().positive(),
   events: z.array(LessonEventSchema),
+  /** One short memory cue from the AI, e.g. "Same as bar 1, then walk down to the thumb." */
+  tip: z.string().max(160).optional(),
 });
 
 export const LessonSchema = z.object({
@@ -32,6 +34,8 @@ export const LessonSchema = z.object({
   keySignature: z.string().default("C"),
   difficulty: z.number().int().min(1).max(5).default(1),
   measures: z.array(LessonMeasureSchema).min(1),
+  /** Where the hands start and anything worth knowing before playing. */
+  summary: z.string().max(400).optional(),
 });
 
 export type LessonSource = z.infer<typeof LessonSourceSchema>;

@@ -5,13 +5,15 @@ import { extname, basename } from "node:path";
 import {
   OMR_PROMPT,
   coerceLesson,
+  composeClaudePrompt,
   extractJsonObject,
   parseLesson,
+  type AppSettings,
   type Lesson,
   type ProviderId,
 } from "@piano-helper/shared";
 import { findClaudeBin, subscriptionEnv } from "./claude-connect.js";
-import { getSecret } from "./storage.js";
+import { getSecret, getSettings } from "./storage.js";
 import { parseMusicXml } from "./musicxml.js";
 
 function parseOrThrow(data: unknown, source: Lesson["source"]): Lesson {
@@ -59,18 +61,28 @@ function runProcess(bin: string, args: string[], timeoutMs: number): Promise<str
   });
 }
 
-async function runClaudeCli(filePath: string, extra = ""): Promise<string> {
+async function runClaudeCli(filePath: string, settings: AppSettings, extra = ""): Promise<string> {
   const bin = findClaudeBin();
-  if (!bin) throw new Error("Install Claude Code and sign in with your Max plan (run: claude). No API key needed.");
-  const prompt = `${OMR_PROMPT}
-
-The score file is attached at:
-${filePath}
-
-${extra}
-
-Return ONLY the JSON object.`;
-  return runProcess(bin, ["-p", prompt, filePath, "--output-format", "text"], 180_000);
+  if (!bin) throw new Error("Connect Claude Desktop in Settings, or sign in with claude. Subscription only — no API key.");
+  const prompt = composeClaudePrompt({
+    extraPrompt: [settings.extraPrompt, extra].filter(Boolean).join("\n\n"),
+    model: settings.claudeModel,
+    effort: settings.claudeEffort,
+    filePath,
+    task: "Read the attached score photo. Transcribe notes and assign fingering. Return ONLY the JSON object if you cannot call push_lesson.",
+  });
+  const args = [
+    "-p",
+    prompt,
+    filePath,
+    "--output-format",
+    "text",
+    "--model",
+    settings.claudeModel || "opus",
+    "--effort",
+    settings.claudeEffort || "high",
+  ];
+  return runProcess(bin, args, 180_000);
 }
 
 async function visionPost(
@@ -100,7 +112,8 @@ function mimeFor(path: string): string {
   return "image/jpeg";
 }
 
-export async function runOmr(filePath: string, provider: ProviderId): Promise<Lesson> {
+export async function runOmr(filePath: string, provider: ProviderId, settings?: AppSettings): Promise<Lesson> {
+  const resolved = settings ?? (await getSettings());
   const ext = extname(filePath).toLowerCase();
   if (ext === ".xml" || ext === ".musicxml") {
     const xml = await readFile(filePath, "utf8");
@@ -116,12 +129,13 @@ export async function runOmr(filePath: string, provider: ProviderId): Promise<Le
   const tryParse = (text: string) => parseOrThrow(extractJsonObject(text), source);
 
   if (provider === "claude-cli") {
-    const first = await runClaudeCli(filePath);
+    const first = await runClaudeCli(filePath, resolved);
     try {
       return tryParse(first);
     } catch {
       const second = await runClaudeCli(
         filePath,
+        resolved,
         `Your last answer was not valid lesson JSON. Fix it.\nBroken output:\n${first.slice(0, 6000)}`,
       );
       return tryParse(second);
@@ -200,9 +214,14 @@ export async function testProvider(provider: ProviderId): Promise<{ ok: boolean;
     if (provider === "none") return { ok: false, message: "Pick a provider." };
     if (provider === "claude-cli") {
       const bin = findClaudeBin();
-      if (!bin) return { ok: false, message: "Claude Code not found. Install it, then Settings → Connect." };
-      await runProcess(bin, ["-p", "Reply with the single word ok", "--output-format", "text"], 30_000);
-      return { ok: true, message: "Claude Code · Max subscription (no API credits)" };
+      if (!bin) return { ok: false, message: "Claude Desktop / Claude Code not found. Settings → Connect." };
+      const s = await getSettings();
+      await runProcess(
+        bin,
+        ["-p", "Reply with the single word ok", "--output-format", "text", "--model", s.claudeModel, "--effort", s.claudeEffort],
+        45_000,
+      );
+      return { ok: true, message: `Subscription · ${s.claudeModel} · ${s.claudeEffort} (no API credits)` };
     }
     const key = await getSecret(provider === "openrouter" ? "openrouter" : provider);
     if (!key) return { ok: false, message: "No key saved." };

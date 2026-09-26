@@ -10,6 +10,7 @@ import {
   type HeardNote,
   type Lesson,
   type PracticeMode,
+  type ShiftFor,
 } from "@piano-helper/shared";
 
 export type EngineState = "idle" | "ready" | "waiting" | "playing" | "paused" | "finished";
@@ -42,6 +43,8 @@ type Options = {
   matchWindowCents: number;
   preferMidi: boolean;
   targetRepeats?: number;
+  /** From this device's mic check: keys the mic hears an octave off. */
+  shiftFor?: ShiftFor;
 };
 
 export class PracticeEngine {
@@ -66,6 +69,8 @@ export class PracticeEngine {
   private lastMiss: string | null = null;
   private consecutiveHits = 0;
   private lastMidiAt = 0;
+  private lastHitMidi: number[] = [];
+  private lastHitAt = 0;
   private flashTimer: number | null = null;
   private playTimer: number | null = null;
   onChange: ((snap: EngineSnapshot) => void) | null = null;
@@ -129,12 +134,14 @@ export class PracticeEngine {
     if (!event) return;
     const windowMs = this.opts.mode === "play" ? 180 : 120;
     const recent = notesInWindow(this.heard, now, windowMs);
-    const hit = expectedHit(recent, event.expectedMidi, this.opts.matchWindowCents);
+    const hit = expectedHit(recent, event.expectedMidi, this.opts.matchWindowCents, this.opts.shiftFor);
     if (hit) {
       this.registerHit(event, now);
       return;
     }
-    const extra = unexpectedPitch(recent, event.expectedMidi);
+    let extra = unexpectedPitch(recent, event.expectedMidi, this.opts.matchWindowCents, this.opts.shiftFor);
+    // The key just played is still ringing when the next one is struck. Hearing it again is not a mistake.
+    if (extra !== null && now - this.lastHitAt < 500 && this.lastHitMidi.some((m) => (((extra as number) - m) % 12 + 12) % 12 === 0)) extra = null;
     if (extra !== null && this.opts.mode === "play") {
       this.flash("miss", extra, event.pitches[0] ?? null);
       this.attempts += 1;
@@ -149,6 +156,8 @@ export class PracticeEngine {
   }
 
   private registerHit(event: FlatEvent, now: number) {
+    this.lastHitMidi = event.expectedMidi;
+    this.lastHitAt = now;
     this.attempts += 1;
     this.hits += 1;
     const gap = now - this.lastEventAt;

@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "build:app": "vite build --mode studio",
     "preview": "vite preview"
   },
   "dependencies": {
