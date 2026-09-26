@@ -38,14 +38,16 @@ ${OMR_SCHEMA}
 
 Pitch rules:
 - Scientific pitch: C4, F#3, Bb2.
-- Maximum 3 pitches per event (melody + simple chords).
+- One event = the notes ONE hand strikes together (up to 5 pitches). Both hands are separate events.
+- Notes the two hands play at the same moment get the same measure "n" and the same "beat".
 - Unreadable note: still emit it and set uncertain: true.
-- Prefer melody / right hand if the page is dense.
+- Transcribe both hands completely, including full chords and held bass notes. Do not simplify.
 - id is a short slug from the title. difficulty 1-5.
 
 Hand and fingering (required — this drives the on-screen hand coach):
-- hand is "rh", "lh", or "both".
-- fingering is piano finger numbers 1=thumb, 2=index, 3=middle, 4=ring, 5=pinky, one number per pitch.
+- hand is "rh" or "lh".
+- fingering is piano finger numbers 1=thumb, 2=index, 3=middle, 4=ring, 5=pinky: EXACTLY one number per pitch, in the same order as "pitches". Every note gets a finger.
+- Chords: fingers follow the spacing (RH C-E-G = 1-3-5, octave = 1-5; LH C-E-G = 5-3-1).
 - Stay in a five-finger position when the notes fit (RH C-D-E-F-G = 1-2-3-4-5).
 - RH ascending scale: 1-2-3-1-2-3-4-5 (thumb under after 3 when the run continues).
 - LH five-finger C-G: 5-4-3-2-1.

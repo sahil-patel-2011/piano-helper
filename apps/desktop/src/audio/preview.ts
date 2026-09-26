@@ -51,10 +51,14 @@ export function playPreview(
   const timers: number[] = [];
   let at = 0;
   events.forEach((ev, i) => {
-    const dur = Math.max(0.25, ev.durationBeats) * beat;
-    for (const midi of ev.expectedMidi) strike(context, bus, midi, t0 + at, dur, gain / Math.sqrt(ev.expectedMidi.length));
+    const ring = Math.max(0.25, ev.durationBeats) * beat;
+    // Steps are spaced by where they sit in the bar, so a held left-hand note under a moving
+    // right hand keeps ringing while the melody moves on.
+    const gapBeats = events[i + 1] ? events[i + 1].absBeat - ev.absBeat : ev.durationBeats;
+    const gap = Math.max(0.2, gapBeats > 0 ? gapBeats : ev.durationBeats) * beat;
+    for (const midi of ev.expectedMidi) strike(context, bus, midi, t0 + at, ring, gain / Math.sqrt(ev.expectedMidi.length));
     timers.push(window.setTimeout(() => onStep(i), (0.12 + at) * 1000));
-    at += dur;
+    at += gap;
   });
   let finish: () => void = () => undefined;
   const done = new Promise<void>((resolve) => {

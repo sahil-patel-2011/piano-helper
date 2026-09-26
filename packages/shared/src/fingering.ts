@@ -1,4 +1,4 @@
-import { type FlatEvent, type Hand } from "./lesson.js";
+import { type FlatEvent, type Hand, type StepNote } from "./lesson.js";
 import { isWhiteKey, midiToPitch } from "./pitch.js";
 
 export type Finger = 1 | 2 | 3 | 4 | 5;
@@ -141,14 +141,26 @@ function chooseNext(
   return { finger: preferStart(nextMidi, hand), action: "shift" };
 }
 
+/**
+ * Fingers for notes struck together, by how far apart they are rather than by count:
+ * C-E-G → 1-3-5, an octave → 1-5, C-E-G-C → 1-2-3-5 (left hand mirrored: 5-3-1, 5-1, ...).
+ * Returned in ascending pitch order.
+ */
 function chordFingers(midis: number[], hand: HandSide): Finger[] {
   const sorted = [...midis].sort((a, b) => a - b);
   if (sorted.length === 1) return [preferStart(sorted[0], hand)];
-  if (hand === "rh") {
-    const start = asFinger(Math.max(1, 6 - sorted.length));
-    return sorted.map((_, i) => asFinger(start + i));
-  }
-  return sorted.map((_, i) => asFinger(5 - i));
+  const lo = sorted[0];
+  const span = Math.max(1, whiteDistance(lo, sorted[sorted.length - 1]));
+  // Right-hand numbering from the bottom note; small chords keep a finger per white key.
+  const rh: number[] = sorted.map((m, i) => {
+    if (i === 0) return 1;
+    const up = Math.max(1, whiteDistance(lo, m));
+    return span >= 4 ? 1 + Math.round((up * 4) / span) : Math.min(5, 1 + up);
+  });
+  // Strictly increasing and within 1-5, even for crowded chords.
+  for (let i = 1; i < rh.length; i += 1) rh[i] = Math.max(rh[i], rh[i - 1] + 1);
+  for (let i = rh.length - 1; i >= 0; i -= 1) rh[i] = Math.min(rh[i], 5 - (rh.length - 1 - i));
+  return rh.map((f) => asFinger(hand === "rh" ? f : 6 - f));
 }
 
 export function shapeFromAnchor(midi: number, finger: Finger, hand: HandSide): Record<number, number> {
@@ -259,4 +271,118 @@ export function adviceAt(events: FlatEvent[], cursor: number): FingerAdvice | nu
   if (!events.length) return null;
   const plan = planFingering(events);
   return plan[Math.min(Math.max(cursor, 0), plan.length - 1)] ?? null;
+}
+
+// ---------------------------------------------------------------- whole-step planning (chords, both hands)
+
+export type PlannedNote = { midi: number; pitch: string; hand: HandSide; finger: Finger };
+
+export type HandPose = {
+  side: HandSide;
+  /** midi → finger for where every finger of this hand sits. */
+  shape: Record<number, number>;
+  /** Fingers pressing a key in this step (empty when the hand is resting). */
+  active: Finger[];
+  resting: boolean;
+};
+
+export type StepPlan = {
+  /** Every key to press now, each with its hand and finger. */
+  notes: PlannedNote[];
+  /** One pose per hand the piece uses; the idle hand shows where it waits. */
+  hands: HandPose[];
+  /** Coaching for the most important note (top of the right hand, else the left hand). */
+  primary: FingerAdvice | null;
+};
+
+/** Fingers for a one-hand chord: written ones first, the rest spread by pitch order. */
+function fingersForChord(notes: StepNote[], hand: HandSide): Finger[] {
+  const byPitch = [...notes].map((n, i) => ({ n, i })).sort((a, b) => a.n.midi - b.n.midi);
+  const guess = chordFingers(byPitch.map((x) => x.n.midi), hand);
+  const out: Finger[] = new Array(notes.length);
+  byPitch.forEach((x, k) => {
+    const written = x.n.finger;
+    out[x.i] = written && written >= 1 && written <= 5 ? asFinger(written) : guess[k];
+  });
+  return out;
+}
+
+/**
+ * Plans every step: a finger for every key (chords and both hands included), and a hand
+ * pose per hand so the screen can draw both hands where they belong.
+ */
+export function planSteps(events: FlatEvent[]): StepPlan[] {
+  const sides: HandSide[] = (["rh", "lh"] as const).filter((side) => events.some((e) => e.notes.some((n) => n.hand === side)));
+  // Per hand: fingers for its notes in each step, then the melody planner over that hand alone.
+  const perHand = new Map<HandSide, { step: number; notes: StepNote[]; fingers: Finger[]; advice?: FingerAdvice }[]>();
+  for (const side of sides) {
+    const rows = events
+      .map((e, step) => ({ step, notes: e.notes.filter((n) => n.hand === side) }))
+      .filter((r) => r.notes.length)
+      .map((r) => ({ ...r, fingers: r.notes.length > 1 ? fingersForChord(r.notes, side) : [] as Finger[] }));
+    // The planner follows one line per hand: the top note of a right-hand chord, the bottom of a left-hand one.
+    const lead = (r: (typeof rows)[number]) => {
+      if (r.notes.length === 1) return { midi: r.notes[0].midi, pitch: r.notes[0].pitch, finger: r.notes[0].finger ?? undefined };
+      const k = r.notes.reduce((best, n, i) => ((side === "rh" ? n.midi > r.notes[best].midi : n.midi < r.notes[best].midi) ? i : best), 0);
+      return { midi: r.notes[k].midi, pitch: r.notes[k].pitch, finger: r.fingers[k] };
+    };
+    const line: FlatEvent[] = rows.map((r, i) => {
+      const l = lead(r);
+      return {
+        beat: 1,
+        durationBeats: 1,
+        pitches: [l.pitch],
+        hand: side,
+        fingering: l.finger ? [l.finger] : undefined,
+        measure: events[r.step].measure,
+        index: i,
+        expectedMidi: [l.midi],
+        absBeat: events[r.step].absBeat,
+        notes: [],
+      };
+    });
+    const advice = planFingering(line);
+    rows.forEach((r, i) => {
+      const a = advice[i];
+      if (r.notes.length === 1) r.fingers = [a.finger];
+      Object.assign(r, { advice: a });
+    });
+    perHand.set(side, rows);
+  }
+
+  const lastPose = new Map<HandSide, HandPose>();
+  // A hand that hasn't started yet waits where it will first play.
+  for (const side of sides) {
+    const first = perHand.get(side)?.[0];
+    if (first) lastPose.set(side, poseFor(side, first.notes, first.fingers, first.advice, true));
+  }
+
+  return events.map((_, step) => {
+    const notes: PlannedNote[] = [];
+    let primary: FingerAdvice | null = null;
+    for (const side of sides) {
+      const row = perHand.get(side)?.find((r) => r.step === step);
+      if (!row) continue;
+      row.notes.forEach((n, k) => notes.push({ midi: n.midi, pitch: n.pitch, hand: side, finger: row.fingers[k] }));
+      lastPose.set(side, poseFor(side, row.notes, row.fingers, row.advice, false));
+      if (side === "rh" || !primary) primary = row.advice ?? null; // rh is visited first
+    }
+    const hands = sides.map((side) => {
+      const pose = lastPose.get(side) as HandPose;
+      const pressing = notes.some((n) => n.hand === side);
+      return pressing ? pose : { ...pose, active: [], resting: true };
+    });
+    return { notes, hands, primary };
+  });
+}
+
+function poseFor(side: HandSide, notes: StepNote[], fingers: Finger[], advice: FingerAdvice | undefined, resting: boolean): HandPose {
+  const anchor = advice ? { midi: advice.midi, finger: advice.finger } : { midi: notes[0].midi, finger: fingers[0] };
+  const shape = shapeFromAnchor(anchor.midi, anchor.finger, side);
+  // Keys actually pressed win over the guessed resting spots.
+  notes.forEach((n, k) => {
+    for (const [m, f] of Object.entries(shape)) if (f === fingers[k] || Number(m) === n.midi) delete shape[Number(m)];
+  });
+  notes.forEach((n, k) => (shape[n.midi] = fingers[k]));
+  return { side, shape, active: resting ? [] : [...new Set(fingers)], resting };
 }

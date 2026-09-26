@@ -254,18 +254,28 @@ export async function studioPaired(): Promise<boolean> {
   return r.paired;
 }
 
-/** Uploads a score photo and waits while Claude Code / Codex on the studio computer reads it. */
-export async function studioImport(file: Blob, name: string, onTick: (seconds: number) => void): Promise<Lesson> {
-  const started = await studioFetch<{ id: string }>(`/api/import?name=${encodeURIComponent(name)}`, {
+/**
+ * Uploads a score photo and waits while Claude Code / Codex on the studio computer reads it.
+ * A photo that was read before comes straight back from the saved copy (`cached`), with no AI call.
+ */
+export async function studioImport(
+  file: Blob,
+  name: string,
+  onTick: (seconds: number) => void,
+): Promise<{ lesson: Lesson; cached: boolean; engine?: string }> {
+  const started = await studioFetch<{ id: string; status: string; cached?: boolean; lesson?: Lesson }>(`/api/import?name=${encodeURIComponent(name)}`, {
     method: "POST",
     body: file,
     headers: { "Content-Type": "application/octet-stream" },
   });
+  if (started.status === "done" && started.lesson) {
+    return { lesson: LessonSchema.parse(started.lesson), cached: Boolean(started.cached) };
+  }
   for (;;) {
     await new Promise((r) => setTimeout(r, 1500));
-    const job = await studioFetch<{ status: string; lesson?: Lesson; error?: string; elapsedMs: number }>(`/api/jobs/${started.id}`);
+    const job = await studioFetch<{ status: string; lesson?: Lesson; error?: string; elapsedMs: number; engine?: string; cached?: boolean }>(`/api/jobs/${started.id}`);
     onTick(Math.round(job.elapsedMs / 1000));
-    if (job.status === "done" && job.lesson) return LessonSchema.parse(job.lesson);
+    if (job.status === "done" && job.lesson) return { lesson: LessonSchema.parse(job.lesson), cached: Boolean(job.cached), engine: job.engine };
     if (job.status === "error") throw new StudioError(job.error ?? "Could not read that page.", "IMPORT_FAILED");
   }
 }

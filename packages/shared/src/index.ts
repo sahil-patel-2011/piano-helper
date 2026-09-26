@@ -10,3 +10,5 @@ export * from "./omr-coerce.js";
 export * from "./errors.js";
 export * from "./fingering.js";
 export * from "./claude-models.js";
+export * from "./tempo.js";
+export * from "./spectrum.js";

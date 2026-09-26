@@ -60,6 +60,7 @@ export async function startMic(
   source.connect(analyser);
 
   const buffer = new Float32Array(LONG);
+  const spectrum = new Float32Array(analyser.frequencyBinCount);
   const recent = buffer.subarray(LONG - SHORT);
   const shortDetector = PitchDetector.forFloat32Array(SHORT);
   const longDetector = PitchDetector.forFloat32Array(LONG);
@@ -74,6 +75,10 @@ export async function startMic(
   let held = false;
   let onsetAt = 0;
   let rearmedAt = 0;
+  // Strike detection for chords: a jump in loudness, then a spectrum once the attack settles.
+  const levels: { t: number; rms: number }[] = [];
+  let lastStrikeAt = 0;
+  let spectrumDueAt = 0;
   let trough = Infinity;
   let timer = 0;
   let alive = true;
@@ -95,6 +100,28 @@ export async function startMic(
     let sum = 0;
     for (const s of recent) sum += s * s;
     const rms = Math.sqrt(sum / recent.length);
+
+    const now = performance.now();
+    levels.push({ t: now, rms });
+    while (levels.length && now - levels[0].t > 160) levels.shift();
+    const recentLow = Math.min(...levels.map((l) => l.rms));
+    if (now - lastStrikeAt > 120 && rms >= minHit && rms > recentLow * 1.8) {
+      lastStrikeAt = now;
+      spectrumDueAt = now + 90; // past the hammer thump, while the strings ring clearly
+    }
+    if (spectrumDueAt && now >= spectrumDueAt) {
+      spectrumDueAt = 0;
+      analyser.getFloatFrequencyData(spectrum);
+      onNote({
+        midi: lastMidi === null ? 0 : Math.round(lastMidi),
+        centsError: 0,
+        rms,
+        source: "mic",
+        t: now,
+        kind: "strike",
+        spectrum: { db: spectrum.slice(), binHz: context.sampleRate / LONG },
+      });
+    }
 
     // Same key struck again while it still rings: the level dips, then jumps.
     // Re-arm so repeated notes (E-E in Ode to Joy) each count.

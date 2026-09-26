@@ -11,7 +11,9 @@ import {
   type Lesson,
   type PracticeMode,
   type ShiftFor,
+  type TimedHit,
 } from "@piano-helper/shared";
+import { estimatePace, smoothPace } from "@piano-helper/shared";
 
 export type EngineState = "idle" | "ready" | "waiting" | "playing" | "paused" | "finished";
 
@@ -33,6 +35,9 @@ export type EngineSnapshot = {
   lastMiss: string | null;
   consecutiveHits: number;
   measureClean: boolean;
+  /** The player's own tempo right now (null until a few notes are in). */
+  paceBpm: number | null;
+  writtenBpm: number;
 };
 
 type Options = {
@@ -45,6 +50,8 @@ type Options = {
   targetRepeats?: number;
   /** From this device's mic check: keys the mic hears an octave off. */
   shiftFor?: ShiftFor;
+  /** Pace carried over from the last run, so a new loop starts at the player's speed. */
+  initialPace?: number | null;
 };
 
 export class PracticeEngine {
@@ -58,7 +65,10 @@ export class PracticeEngine {
   private hits = 0;
   private attempts = 0;
   private onTime = 0;
-  private playStarted = 0;
+  /** Where the player really is: the last step played and when, so play-along follows them. */
+  private anchor: TimedHit | null = null;
+  private timedHits: TimedHit[] = [];
+  private pace: number | null = null;
   private lastEventAt = 0;
   private longestGap = 0;
   private cleanRepeats = 0;
@@ -91,10 +101,12 @@ export class PracticeEngine {
     this.spanDirty = false;
     this.startedAt = performance.now();
     this.lastEventAt = this.startedAt;
+    this.anchor = null;
+    this.timedHits = [];
+    this.pace = this.opts.initialPace ?? null;
     if (this.opts.mode === "play") {
+      // Play-along follows the player: no clock runs ahead of them.
       this.state = "playing";
-      this.playStarted = performance.now();
-      this.armPlay();
     } else {
       this.state = "waiting";
     }
@@ -113,7 +125,6 @@ export class PracticeEngine {
     if (this.state !== "paused") return;
     this.startedAt = performance.now();
     this.state = this.opts.mode === "play" ? "playing" : "waiting";
-    if (this.state === "playing") this.armPlay();
     this.emit();
   }
 
@@ -129,19 +140,43 @@ export class PracticeEngine {
     if (this.state !== "waiting" && this.state !== "playing") return;
     this.heard.push(note);
     const now = performance.now();
-    this.heard = notesInWindow(this.heard, now, 160);
+    this.heard = notesInWindow(this.heard, now, 260);
     const event = this.events[this.cursor];
     if (!event) return;
-    const windowMs = this.opts.mode === "play" ? 180 : 120;
+    // Hands never land a chord at exactly the same instant; give multi-key steps longer.
+    const windowMs = event.expectedMidi.length > 1 ? 250 : this.opts.mode === "play" ? 180 : 120;
     const recent = notesInWindow(this.heard, now, windowMs);
     const hit = expectedHit(recent, event.expectedMidi, this.opts.matchWindowCents, this.opts.shiftFor);
     if (hit) {
       this.registerHit(event, now);
       return;
     }
+    // Score following: if the player has moved on to the next step or the one after,
+    // go with them and count what they skipped. Not for the key that is still ringing.
+    if (this.opts.mode === "play") {
+      const ringing = (m: number) => now - this.lastHitAt < 500 && this.lastHitMidi.includes(m);
+      for (const k of [1, 2]) {
+        const ahead = this.events[this.cursor + k];
+        if (!ahead || ahead.expectedMidi.some(ringing)) continue;
+        if (expectedHit(recent, ahead.expectedMidi, this.opts.matchWindowCents, this.opts.shiftFor)) {
+          this.attempts += k;
+          this.spanDirty = true;
+          this.consecutiveHits = 0;
+          this.cursor += k;
+          this.registerHit(ahead, now);
+          return;
+        }
+      }
+    }
     let extra = unexpectedPitch(recent, event.expectedMidi, this.opts.matchWindowCents, this.opts.shiftFor);
     // The key just played is still ringing when the next one is struck. Hearing it again is not a mistake.
-    if (extra !== null && now - this.lastHitAt < 500 && this.lastHitMidi.some((m) => (((extra as number) - m) % 12 + 12) % 12 === 0)) extra = null;
+    // After a chord, its ringing tail can alias to pitches that were never played; don't trust those either.
+    if (
+      extra !== null &&
+      now - this.lastHitAt < 500 &&
+      (this.lastHitMidi.length > 1 || this.lastHitMidi.some((m) => (((extra as number) - m) % 12 + 12) % 12 === 0))
+    )
+      extra = null;
     if (extra !== null && this.opts.mode === "play") {
       this.flash("miss", extra, event.pitches[0] ?? null);
       this.attempts += 1;
@@ -163,11 +198,14 @@ export class PracticeEngine {
     const gap = now - this.lastEventAt;
     this.longestGap = Math.max(this.longestGap, gap);
     this.lastEventAt = now;
-    if (this.opts.mode === "play") {
-      const expectedT = this.eventTime(event);
-      const window = Math.max(80, (60 / this.opts.lesson.tempoBpm) * 1000 * 0.15);
-      if (Math.abs(now - expectedT) <= window) this.onTime += 1;
+    if (this.opts.mode === "play" && this.anchor) {
+      const window = Math.max(90, this.msPerBeat() * 0.2);
+      if (Math.abs(now - this.expectedAt(event)) <= window) this.onTime += 1;
     }
+    this.timedHits.push({ t: now, beat: event.absBeat });
+    if (this.timedHits.length > 16) this.timedHits.shift();
+    this.pace = smoothPace(this.pace, estimatePace(this.timedHits, this.opts.lesson.tempoBpm));
+    this.anchor = { t: now, beat: event.absBeat };
     this.consecutiveHits += 1;
     this.flash("hit", event.expectedMidi[0] ?? null, event.pitches.join(" "));
     this.advance();
@@ -206,35 +244,16 @@ export class PracticeEngine {
     this.emit();
   }
 
-  private eventTime(event: FlatEvent): number {
-    const msPerBeat = (60 / this.opts.lesson.tempoBpm) * 1000;
-    let beats = 0;
-    for (const e of this.events) {
-      if (e.index === event.index) break;
-      beats += e.durationBeats;
-    }
-    return this.playStarted + beats * msPerBeat;
+  /** Milliseconds per beat at the player's pace (the written tempo until there is one). */
+  private msPerBeat(): number {
+    return 60000 / (this.pace ?? this.opts.lesson.tempoBpm);
   }
 
-  private armPlay() {
-    this.clearPlay();
-    const tick = () => {
-      if (this.state !== "playing") return;
-      const event = this.events[this.cursor];
-      if (!event) {
-        this.finish();
-        return;
-      }
-      const due = this.eventTime(event) + Math.max(80, (60 / this.opts.lesson.tempoBpm) * 1000 * 0.35);
-      if (performance.now() > due) {
-        this.attempts += 1;
-        this.spanDirty = true;
-        this.flash("miss", null, event.pitches[0] ?? null);
-        this.advance();
-      }
-      this.playTimer = window.setTimeout(tick, 40);
-    };
-    this.playTimer = window.setTimeout(tick, 40);
+  /** When this step should land if the player keeps their current pace from the last note they played. */
+  private expectedAt(event: FlatEvent): number {
+    if (!this.anchor) return performance.now();
+    const beats = Math.max(0, event.absBeat - this.anchor.beat);
+    return this.anchor.t + beats * this.msPerBeat();
   }
 
   private clearPlay() {
@@ -291,6 +310,8 @@ export class PracticeEngine {
       lastMiss: this.lastMiss,
       consecutiveHits: this.consecutiveHits,
       measureClean: !this.spanDirty,
+      paceBpm: this.pace === null ? null : Math.round(this.pace),
+      writtenBpm: this.opts.lesson.tempoBpm,
     };
   }
 

@@ -43,7 +43,7 @@ function pitchesFrom(value: unknown): string[] {
   const out: string[] = [];
   for (const part of parts) {
     const p = normalizePitch(part);
-    if (p && !out.includes(p) && out.length < 3) out.push(p);
+    if (p && !out.includes(p) && out.length < 5) out.push(p);
   }
   return out;
 }

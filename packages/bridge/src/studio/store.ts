@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { extname, join } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   AppSettingsSchema,
   LessonSchema,
@@ -88,13 +88,58 @@ const IMAGE_EXT = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".heic", ".
 
 /** Saves uploaded bytes under imports/<uuid>/ and returns the absolute path. */
 export async function saveUpload(name: string, bytes: Buffer): Promise<string> {
+  return (await saveUploadWithId(name, bytes)).path;
+}
+
+export async function saveUploadWithId(name: string, bytes: Buffer): Promise<{ id: string; dir: string; path: string }> {
   let ext = extname(name).toLowerCase();
   if (!IMAGE_EXT.has(ext)) ext = ".jpg";
-  const dir = file(join("imports", randomUUID()));
+  const id = randomUUID();
+  const dir = file(join("imports", id));
   await mkdir(dir, { recursive: true });
-  const dest = join(dir, `source${ext}`);
-  await writeFile(dest, bytes);
-  return dest;
+  const path = join(dir, `source${ext}`);
+  await writeFile(path, bytes);
+  return { id, dir, path };
+}
+
+// ---------------------------------------------------------------- read once, keep forever
+// Each photo is read by the AI once. Its folder keeps the photo, the AI's answer word for
+// word, and the lesson made from it. The same photo again reuses that lesson, no AI call.
+
+type PhotoIndex = Record<string, { importId: string; lessonId: string }>;
+
+export function photoFingerprint(bytes: Buffer): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+/** The lesson already made from this exact photo, if there is one. */
+export async function findReading(fingerprint: string): Promise<Lesson | null> {
+  const index = await readJson<PhotoIndex>(file("studio/photos.json"), {});
+  const hit = index[fingerprint];
+  return hit ? loadLesson(hit.lessonId) : null;
+}
+
+export async function keepReading(opts: {
+  fingerprint: string;
+  importId: string;
+  dir: string;
+  engine: string;
+  raw: string[];
+  lesson: Lesson;
+}) {
+  const divider = "\n\n----- asked to fix the JSON; second answer -----\n\n";
+  await writeFile(join(opts.dir, "ai-output.txt"), opts.raw.join(divider), "utf8");
+  await writeJson(join(opts.dir, "lesson.json"), opts.lesson);
+  await writeJson(join(opts.dir, "reading.json"), {
+    engine: opts.engine,
+    readAt: opts.lesson.origin?.readAt ?? new Date().toISOString(),
+    photoSha256: opts.fingerprint,
+    lessonId: opts.lesson.id,
+    answers: opts.raw.length,
+  });
+  const index = await readJson<PhotoIndex>(file("studio/photos.json"), {});
+  index[opts.fingerprint] = { importId: opts.importId, lessonId: opts.lesson.id };
+  await writeJson(file("studio/photos.json"), index);
 }
 
 export function studioDir() {

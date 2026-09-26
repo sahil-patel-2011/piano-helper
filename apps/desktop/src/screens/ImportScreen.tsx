@@ -68,7 +68,7 @@ export function ImportScreen() {
     return () => window.removeEventListener("paste", onPaste);
   }, []);
 
-  async function finish(lesson: Lesson) {
+  async function finish(lesson: Lesson, cached = false) {
     const api = getPiano();
     await api.saveLesson(lesson);
     useAppStore.getState().setLibrary(await api.listLibrary());
@@ -82,6 +82,12 @@ export function ImportScreen() {
     if (unsure && !settings.simpleView) {
       showToast(`Imported ${lesson.title}. Check the notes marked unsure.`);
       setScreen("editor");
+      return;
+    }
+    if (cached) {
+      showToast(`Already read this photo, so it's using the saved notes for ${lesson.title}. No AI needed.`);
+      useAppStore.getState().setMode("learn");
+      setScreen("practice");
       return;
     }
     showToast(unsure ? `Ready: ${lesson.title}. ${unsure} note${unsure > 1 ? "s" : ""} the AI wasn't sure of — use Hear it if something sounds off.` : `Ready: ${lesson.title}`);
@@ -109,10 +115,10 @@ export function ImportScreen() {
         const { blob, name } = await shrinkPhoto(file);
         const who = readerLabel || "The AI";
         setStatus(`${who} is reading the notes on your computer…`);
-        const lesson = await studioImport(blob, name, (sec) =>
+        const read = await studioImport(blob, name, (sec) =>
           setStatus(`${who} is reading the notes… ${sec}s (usually 30–90s)`),
         );
-        await finish(lesson);
+        await finish(read.lesson, read.cached);
         return;
       }
       const payload = await fileToPayload(file);

@@ -24,7 +24,10 @@ import {
   saveLesson,
   saveProgress,
   saveSettings,
-  saveUpload,
+  saveUploadWithId,
+  findReading,
+  keepReading,
+  photoFingerprint,
   studioDir,
 } from "./store.js";
 import { lanAddresses, loadOrCreateCert } from "./tls.js";
@@ -35,7 +38,16 @@ export const WEB_ROOT = resolve(here, "..", "..", "..", "..", "apps", "desktop",
 const MAX_UPLOAD = 25 * 1024 * 1024;
 const MAX_JSON = 2 * 1024 * 1024;
 
-type Job = { id: string; status: "running" | "done" | "error"; engine?: string; lesson?: Lesson; error?: string; startedAt: number };
+type Job = {
+  id: string;
+  status: "running" | "done" | "error";
+  engine?: string;
+  lesson?: Lesson;
+  error?: string;
+  /** True when this photo was read before and its saved lesson was reused (no AI call). */
+  cached?: boolean;
+  startedAt: number;
+};
 type Live = Record<string, unknown>;
 
 const jobs = new Map<string, Job>();
@@ -234,19 +246,32 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL) {
       fail(res, 400, "That file was empty.");
       return;
     }
+    // Same photo as before: reuse the saved lesson. The AI reads each photo only once.
+    const fingerprint = photoFingerprint(bytes);
+    const known = await findReading(fingerprint);
+    if (known) {
+      const job: Job = { id: randomUUID(), status: "done", lesson: known, engine: known.origin?.engine, cached: true, startedAt: Date.now() };
+      jobs.set(job.id, job);
+      log(`"${known.title}" was read before; using the saved notes (no AI call)`);
+      send(res, 202, { id: job.id, status: job.status, cached: true, lesson: known });
+      return;
+    }
     const settings = await getSettings();
     if (!engineStatus(settings.omrEngine).active) {
       fail(res, 503, "No reader found. Install Claude Code or Codex on the studio computer and sign in once.", "NO_PROVIDER");
       return;
     }
-    const imagePath = await saveUpload(name, bytes);
+    const upload = await saveUploadWithId(name, bytes);
+    const imagePath = upload.path;
     const job: Job = { id: randomUUID(), status: "running", startedAt: Date.now() };
     jobs.set(job.id, job);
     send(res, 202, { id: job.id, status: job.status });
     log(`reading ${name} (${Math.round(bytes.length / 1024)} KB)…`);
     void readScore(imagePath, settings)
-      .then(async ({ lesson, engine }) => {
-        const saved = await saveLesson(lesson);
+      .then(async ({ lesson, engine, raw }) => {
+        const origin = { importId: upload.id, engine, readAt: new Date().toISOString(), photoSha256: fingerprint };
+        const saved = await saveLesson({ ...lesson, origin });
+        await keepReading({ fingerprint, importId: upload.id, dir: upload.dir, engine, raw, lesson: saved });
         Object.assign(job, { status: "done", lesson: saved, engine });
         broadcast({ type: "library" });
         log(`read "${saved.title}" with ${engine} in ${Math.round((Date.now() - job.startedAt) / 1000)}s`);

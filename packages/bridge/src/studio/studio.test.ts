@@ -31,6 +31,9 @@ let key = "";
 let close: () => Promise<void> = async () => undefined;
 
 const IMAGE = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(4096, 7)]);
+let photoCount = 0;
+/** A different "photo" each call, so tests that need a fresh AI read get one. */
+const freshPhoto = () => Buffer.concat([IMAGE, Buffer.from(`photo-${(photoCount += 1)}-${Date.now()}`)]);
 
 function calls() {
   try {
@@ -45,10 +48,10 @@ async function api<T = Record<string, unknown>>(path: string, init: RequestInit 
   return { status: res.status, body: (await res.json().catch(() => ({}))) as T };
 }
 
-async function importPhoto(): Promise<Record<string, unknown>> {
+async function importPhoto(photo: Buffer = freshPhoto()): Promise<Record<string, unknown>> {
   const started = await api<{ id: string }>("/api/import?name=page.jpg", {
     method: "POST",
-    body: IMAGE,
+    body: photo,
     headers: { "Content-Type": "application/octet-stream" },
   });
   expect(started.status).toBe(202);
@@ -171,6 +174,64 @@ describe("photo → lesson", () => {
   it("rejects an empty upload", async () => {
     const res = await api("/api/import?name=x.jpg", { method: "POST", body: Buffer.alloc(10) });
     expect(res.status).toBe(400);
+  });
+});
+
+describe("read once, keep forever", () => {
+  it("reads a photo with the AI once, then reuses the saved notes", async () => {
+    const photo = freshPhoto();
+    const first = await importPhoto(photo);
+    expect(first.status).toBe("done");
+    const aiCalls = calls().length;
+    expect(aiCalls).toBeGreaterThan(0);
+
+    const again = await importPhoto(photo);
+    expect(again.status).toBe("done");
+    expect(again.cached).toBe(true);
+    expect((again.lesson as { id: string }).id).toBe((first.lesson as { id: string }).id);
+    expect(calls()).toHaveLength(aiCalls); // no CLI ran the second time
+  });
+
+  it("keeps the AI's answer word for word next to the photo", async () => {
+    const job = await importPhoto();
+    const lesson = job.lesson as { id: string; origin: { importId: string; engine: string; photoSha256: string } };
+    expect(lesson.origin.engine).toBe("codex");
+    const dir = join(data, "Piano Helper", "imports", lesson.origin.importId);
+    expect(readFileSync(join(dir, "ai-output.txt"), "utf8")).toContain("Here is the lesson");
+    const reading = JSON.parse(readFileSync(join(dir, "reading.json"), "utf8")) as { engine: string; photoSha256: string; lessonId: string };
+    expect(reading).toMatchObject({ engine: "codex", photoSha256: lesson.origin.photoSha256, lessonId: lesson.id });
+    expect(JSON.parse(readFileSync(join(dir, "lesson.json"), "utf8")).id).toBe(lesson.id);
+  });
+
+  it("keeps the first answer and the fixed one when the AI had to be asked twice", async () => {
+    process.env.STUB_CODEX = "garbage-once";
+    const job = await importPhoto();
+    const origin = (job.lesson as { origin: { importId: string } }).origin;
+    const saved = readFileSync(join(data, "Piano Helper", "imports", origin.importId, "ai-output.txt"), "utf8");
+    expect(saved).toContain("I looked at the page");
+    expect(saved).toContain("second answer");
+  });
+
+  it("practising, reopening and restarting never call the AI", async () => {
+    const photo = freshPhoto();
+    const job = await importPhoto(photo);
+    const id = (job.lesson as { id: string }).id;
+    const before = calls().length;
+
+    for (let i = 0; i < 3; i += 1) expect((await api(`/api/lessons/${id}`)).status).toBe(200);
+    await api("/api/state");
+    await api("/api/library");
+
+    // Restart the whole studio: the lesson and the photo index come back from disk.
+    await close();
+    const info = await server.startStudio({ port: 0, https: false, bridgePort: 0, handleSignals: false });
+    base = `http://127.0.0.1:${info.localPort}`;
+    key = info.key;
+    close = info.close;
+    expect((await api<{ id: string }>(`/api/lessons/${id}`)).body.id).toBe(id);
+    expect((await importPhoto(photo)).cached).toBe(true);
+
+    expect(calls()).toHaveLength(before);
   });
 });
 

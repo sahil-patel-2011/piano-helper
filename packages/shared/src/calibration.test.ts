@@ -66,6 +66,9 @@ describe("chords", () => {
 
   it("still rejects a wrong key", () => {
     expect(expectedHit([mic(62)], [60, 64, 67], 50)).toBe(false);
-    expect(unexpectedPitch([mic(62)], [60, 64, 67])).toBe(62);
+    // One mic pitch can't prove a chord wrong, so it waits; MIDI knows exactly.
+    expect(unexpectedPitch([mic(62)], [60, 64, 67])).toBeNull();
+    expect(unexpectedPitch([key(62)], [60, 64, 67])).toBe(62);
+    expect(unexpectedPitch([mic(62)], [60])).toBe(62);
   });
 });

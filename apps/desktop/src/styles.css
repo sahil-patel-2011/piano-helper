@@ -1493,3 +1493,70 @@ button.big {
 .today-line {
   justify-content: space-between;
 }
+
+/* ---------------------------------------------------------------- two hands, chords */
+
+.hand-layer.resting {
+  opacity: 0.38;
+}
+
+.hand-layer.resting.faded {
+  opacity: 0.22;
+}
+
+.palm-label {
+  fill: rgba(246, 222, 190, 0.75);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-family: "IBM Plex Sans", sans-serif;
+}
+
+/* A step with several keys: one chip per hand, one coloured finger per key. */
+.step-hands {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin: 0.3rem 0 0.2rem;
+}
+
+.step-hand {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #181714;
+}
+
+.step-hand .who {
+  font-size: 0.8rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-right: 0.2rem;
+}
+
+.finger-chip {
+  width: 2.3rem;
+  height: 2.3rem;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 1.3rem;
+  color: #1b1a17;
+}
+
+.finger-chip.f1 { background: var(--f1); }
+.finger-chip.f2 { background: var(--f2); }
+.finger-chip.f3 { background: var(--f3); }
+.finger-chip.f4 { background: var(--f4); }
+.finger-chip.f5 { background: var(--f5); }
+
+.pace-line {
+  font-variant-numeric: tabular-nums;
+}
