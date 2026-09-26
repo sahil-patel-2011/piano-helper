@@ -5,14 +5,19 @@ export type HandOverlay = {
   side: "rh" | "lh";
   /** midi → finger (1 thumb … 5 pinky): where each finger rests. */
   shape: Record<number, number>;
-  /** Finger that plays now. */
-  active: number | null;
+  /** Fingers pressing a key now (several for a chord, none while the hand waits). */
+  active: number[];
+  /** Dim the whole hand (cues fading as the piece is learned). */
   faded?: boolean;
+  /** This hand isn't playing right now; it's shown where it waits. */
+  resting?: boolean;
 };
 
 type Props = {
-  /** Draws a hand over the keys, fingertips on the keys they cover. */
-  hand?: HandOverlay | null;
+  /** Draws each hand over the keys, fingertips on the keys they cover. */
+  hands?: HandOverlay[];
+  /** Keys that must stay on screen (e.g. where the resting hand waits). */
+  keepVisible?: number[];
   keyCount?: KeyCount;
   targets?: number[];
   /** Keys coming up after the current one — drawn as a faint outline so the hand can get ready. */
@@ -32,6 +37,8 @@ type Props = {
 type Span = { from: number; to: number };
 
 const MIN_WHITE = 34;
+/** Two hands far apart on a phone: keys may get this narrow so both stay on screen. */
+const MIN_WHITE_WIDE = 13;
 const MAX_WHITE = 56;
 
 function whitesBetween(from: number, to: number) {
@@ -55,7 +62,8 @@ function spanAround(center: number, whites: number, keyCount: KeyCount): Span {
 }
 
 export function PianoKeyboard({
-  hand = null,
+  hands = [],
+  keepVisible = [],
   keyCount = 88,
   targets = [],
   upcoming = [],
@@ -95,10 +103,10 @@ export function PianoKeyboard({
   // target leaves the visible span, so each key stays where the hand learned it.
   const { from, to } = useMemo(() => {
     const kept = spanRef.current;
-    const wanted = [...targets, ...upcoming.slice(0, 2)];
+    const wanted = [...targets, ...upcoming.slice(0, 2), ...keepVisible];
     const inside = (s: Span) => wanted.every((m) => m > s.from && m < s.to);
     if (kept && kept.fit === fitWhites && kept.keyCount === keyCount && inside(kept.span)) return kept.span;
-    const pool = targets.length ? targets : wanted;
+    const pool = targets.length ? [...targets, ...keepVisible] : wanted;
     const center = pool.length ? Math.round(pool.reduce((a, b) => a + b, 0) / pool.length) : 60;
     let next = spanAround(center, fitWhites, keyCount);
     if (!inside(next) && pool.length) {
@@ -110,11 +118,12 @@ export function PianoKeyboard({
     }
     spanRef.current = { span: next, fit: fitWhites, keyCount };
     return next;
-  }, [targets, upcoming, fitWhites, keyCount]);
+  }, [targets, upcoming, keepVisible, fitWhites, keyCount]);
 
   const whites: number[] = [];
   for (let midi = from; midi <= to; midi += 1) if (isWhiteKey(midi)) whites.push(midi);
-  const whiteW = Math.max(MIN_WHITE * (compact ? 0.8 : 1), Math.min(MAX_WHITE, Math.floor(wrapWidth / whites.length)));
+  const floorW = whites.length > fitWhites ? MIN_WHITE_WIDE : MIN_WHITE * (compact ? 0.8 : 1);
+  const whiteW = Math.max(floorW, Math.min(MAX_WHITE, Math.floor(wrapWidth / whites.length)));
   const width = whites.length * whiteW;
 
   useEffect(() => {
@@ -152,14 +161,15 @@ export function PianoKeyboard({
   };
 
   const hideNames = !showNames || memoryLevel >= 2;
-  const hidePlay = memoryLevel >= 1;
+  // With a hand drawn, the glowing fingertip already says "play this key".
+  const hidePlay = memoryLevel >= 1 || hands.length > 0;
   const fingerOn = (midi: number) => fingerings[midi] ?? shape[midi];
 
   const label = (midi: number) => (
     <>
       {!hideNames && <span className="key-name">{midiToPitch(midi)}</span>}
       {!showNames && midi === 60 && <span className="key-name c-mark">middle C</span>}
-      {showFingering && !hand && fingerOn(midi) ? (
+      {showFingering && !hands.length && fingerOn(midi) ? (
         <span className={`fingering ${fingerings[midi] ? "now" : "home"}`}>{fingerOn(midi)}</span>
       ) : null}
     </>
@@ -169,7 +179,7 @@ export function PianoKeyboard({
     <div ref={wrapRef} className={`keyboard-wrap ${compact ? "compact" : ""} memory-${memoryLevel}`}>
       <div
         ref={boardRef}
-        className={`keyboard${hand ? " with-hand" : ""}`}
+        className={`keyboard${hands.length ? " with-hand" : ""}`}
         style={{ width, ["--white-w" as string]: `${whiteW}px` }}
       >
         {whites.map((midi) => (
@@ -202,7 +212,9 @@ export function PianoKeyboard({
             {label(midi)}
           </button>
         ))}
-        {hand && <HandLayer hand={hand} from={from} to={to} whiteW={whiteW} height={boardHeight} xCenter={xCenter} />}
+        {hands.map((h) => (
+          <HandLayer key={h.side} hand={h} from={from} to={to} whiteW={whiteW} height={boardHeight} xCenter={xCenter} />
+        ))}
       </div>
     </div>
   );
@@ -242,12 +254,13 @@ function HandLayer({
   const knuckleGap = Math.min(whiteW * 0.85, Math.max(whiteW * 0.5, spread / 4));
   // Screen left-to-right: right hand is thumb…pinky, left hand pinky…thumb.
   const slot = (f: number) => (hand.side === "rh" ? f - 1 : 5 - f) - 2;
-  const finger = Math.max(12, Math.min(24, whiteW * 0.44));
-  const r = Math.max(10, Math.min(16, whiteW * 0.3));
+  const finger = Math.max(7, Math.min(24, whiteW * 0.44));
+  // Tips shrink with the keys so neighbouring fingers never overlap on a narrow screen.
+  const r = Math.max(6, Math.min(16, whiteW * (whiteW < 26 ? 0.46 : 0.3)));
 
   return (
     <svg
-      className={`hand-layer ${hand.faded ? "faded" : ""}`}
+      className={`hand-layer ${hand.side} ${hand.faded ? "faded" : ""} ${hand.resting ? "resting" : ""}`}
       width="100%"
       height={height + palmH}
       style={{ height: height + palmH }}
@@ -260,6 +273,9 @@ function HandLayer({
         rx={Math.max(spread / 2 + whiteW * 0.55, whiteW * 1.6)}
         ry={palmH * 0.62}
       />
+      <text className="palm-label" x={palmX} y={palmY + palmH * 0.42} textAnchor="middle" dominantBaseline="central">
+        {hand.side === "lh" ? "Left" : "Right"}
+      </text>
       {tips.map((t) => {
         const bx = palmX + slot(t.finger) * knuckleGap;
         const by = palmY - (t.finger === 1 ? -palmH * 0.05 : palmH * 0.3);
@@ -277,7 +293,7 @@ function HandLayer({
         );
       })}
       {tips.map((t) => {
-        const active = hand.active === t.finger;
+        const active = hand.active.includes(t.finger);
         return (
           <g key={`t${t.finger}`} className={`hand-tip f${t.finger}${active ? " active" : ""}`}>
             {active && <circle cx={t.x} cy={t.y} r={r + 7} className="tip-glow" />}

@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   COPY,
-  adviceAt,
+  planSteps,
   localDateKey,
   nextMastery,
   octaveShiftNear,
   type FlatEvent,
+  type StepPlan,
   type PracticeMode,
 } from "@piano-helper/shared";
 import { PianoKeyboard, type HandOverlay } from "../components/keyboard/PianoKeyboard";
@@ -73,12 +74,15 @@ export function PracticeScreen() {
   const [peekAt, setPeekAt] = useState(-1);
   const [learnDone, setLearnDone] = useState(false);
   const autoPreview = useRef(false);
+  /** The player's pace survives into the next loop / Learn stage, so it starts at their speed. */
+  const paceRef = useRef<number | null>(null);
   const simple = settings.simpleView !== false;
 
   const bars = useMemo(() => lesson?.measures.map((m) => m.n) ?? [], [lesson]);
 
   // Learn mode resumes at the first bar that isn't solid yet.
   useEffect(() => {
+    previewRef.current?.stop();
     if (mode !== "learn" || !lesson) {
       autoPreview.current = false;
       setLearn(null);
@@ -126,6 +130,7 @@ export function PracticeScreen() {
       preferMidi: Boolean(profile?.preferMidi && useAppStore.getState().midiName),
       targetRepeats: spec.repeats,
       shiftFor,
+      initialPace: paceRef.current,
     });
     engine.onChange = setSnap;
     engine.onMeasureClean = (measure) => {
@@ -142,7 +147,7 @@ export function PracticeScreen() {
     engine.start();
     const m = metro.current;
     m.setBeats(lesson.timeSignature.num);
-    m.setBpm(spec.mode === "slow" ? lesson.tempoBpm * settings.slowFactor : lesson.tempoBpm);
+    m.setBpm(paceRef.current ?? (spec.mode === "slow" ? lesson.tempoBpm * settings.slowFactor : lesson.tempoBpm));
     m.setVolume(settings.mixer.metronome);
     if (spec.mode === "play") m.start();
     return () => {
@@ -310,7 +315,9 @@ export function PracticeScreen() {
       events ??
       (here ? snap.events.slice(snap.cursor).filter((e, i) => e.measure === here.measure || i < 6).slice(0, 12) : []);
     if (!phrase.length) return;
-    const handle = playPreview(phrase, lesson.tempoBpm * 0.8, Math.max(35, settings.mixer.preview), (i) =>
+    // Demo at the speed the player is actually playing, once we know it.
+    const bpm = snap.paceBpm ?? paceRef.current ?? lesson.tempoBpm * 0.8;
+    const handle = playPreview(phrase, bpm, Math.max(35, settings.mixer.preview), (i) =>
       setPreviewIdx(i === null ? null : start + i),
     );
     previewRef.current = handle;
@@ -320,19 +327,19 @@ export function PracticeScreen() {
     });
   }
 
-  const advice = useMemo(() => (snap ? adviceAt(snap.events, snap.cursor) : null), [snap]);
-  const previewAdvice = useMemo(
-    () => (snap && previewIdx !== null ? adviceAt(snap.events, previewIdx) : null),
-    [snap, previewIdx],
-  );
-  const nextAdvice = useMemo(
-    () => (snap && snap.cursor + 1 < snap.events.length ? adviceAt(snap.events, snap.cursor + 1) : null),
-    [snap],
-  );
-  const next2Advice = useMemo(
-    () => (snap && snap.cursor + 2 < snap.events.length ? adviceAt(snap.events, snap.cursor + 2) : null),
-    [snap],
-  );
+  // Fingers for every key of every step, both hands. Planned once per run, not per note.
+  const events = snap?.events;
+  const plan = useMemo<StepPlan[]>(() => (events ? planSteps(events) : []), [events]);
+  const step = snap ? plan[snap.cursor] : undefined;
+  const previewStep = previewIdx !== null ? plan[previewIdx] : undefined;
+  const advice = step?.primary ?? null;
+
+  // Follow the player: remember their pace and keep the metronome with them.
+  useEffect(() => {
+    if (snap?.paceBpm == null) return;
+    paceRef.current = snap.paceBpm;
+    metro.current.setBpm(snap.paceBpm);
+  }, [snap?.paceBpm]);
 
   if (!lesson) {
     return (
@@ -362,15 +369,30 @@ export function PracticeScreen() {
   const hidden = learn?.stage === "memory" && peekAt !== snap?.cursor && !previewEvent;
   const streakFade = mode === "learn" ? 0 : snap && snap.consecutiveHits >= 6 ? 2 : snap && snap.consecutiveHits >= 3 ? 1 : 0;
   const memoryLevel = learn?.stage === "chain" || learn?.stage === "whole" ? 1 : streakFade;
-  const shown = previewAdvice ?? advice;
-  const hand: HandOverlay | null =
-    settings.showFingering && shown && !hidden && !finished
-      ? { side: shown.hand, shape: shown.shape, active: shown.finger, faded: memoryLevel >= 1 && !previewEvent }
-      : null;
+  const shownStep = previewStep ?? step;
+  const shown = shownStep?.primary ?? null;
+  const handPoses: HandOverlay[] =
+    settings.showFingering && shownStep && !hidden && !finished
+      ? shownStep.hands.map((h) => ({ ...h, faded: memoryLevel >= 1 && !previewEvent }))
+      : [];
+  const twoHanded = plan.some((p) => p.hands.length > 1);
+  // Both hands stay on screen for two-hand music, so you always see where each one waits.
+  const keepVisible = handPoses.flatMap((h) => Object.keys(h.shape).map(Number));
   const targets = hidden || finished ? [] : previewEvent ? previewEvent.expectedMidi : (snap?.expectedMidi ?? ev?.expectedMidi ?? []);
   const barTip = lesson.measures.find((m) => m.n === (previewEvent?.measure ?? snap?.measure))?.tip;
   const handName = (h?: string) => (h === "lh" ? "Left hand" : "Right hand");
-  const fingerWord = (a: typeof advice) => (a ? `${a.hand === "lh" ? "L" : "R"}${a.finger}` : "");
+  // "R1+3+5 L5": every key of a step, by hand.
+  const stepWord = (p?: StepPlan) =>
+    p
+      ? (["rh", "lh"] as const)
+          .map((side) => {
+            const fs = p.notes.filter((n) => n.hand === side).map((n) => n.finger);
+            return fs.length ? `${side === "lh" ? "L" : "R"}${fs.join("+")}` : "";
+          })
+          .filter(Boolean)
+          .join(" ")
+      : "";
+  const chord = (shownStep?.notes.length ?? 0) > 1 || (twoHanded && shownStep?.notes.some((n) => n.hand === "lh"));
 
   return (
     <div className="practice-shell">
@@ -383,6 +405,14 @@ export function PracticeScreen() {
               {useAppStore.getState().midiName ? ` · MIDI ${useAppStore.getState().midiName}` : " · listening"}
               {snap && mode !== "learn" ? ` · ${acc}% clean` : ""}
               {snap && snap.consecutiveHits >= 3 ? ` · ${snap.consecutiveHits} in a row` : ""}
+              {lesson.origin ? (
+                <span title="The AI read this photo once. Practising always uses this saved copy.">
+                  {" "}
+                  · saved from your photo ({lesson.origin.engine === "codex" ? "Codex" : "Claude"},{" "}
+                  {new Date(lesson.origin.readAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })})
+                </span>
+              ) : null}
+              {snap?.paceBpm ? <span className="pace-line"> · your pace {snap.paceBpm} bpm{spec?.mode === "play" ? " (following you)" : ""}</span> : null}
             </div>
           </div>
           <div className="muted">{formatTime(snap?.elapsedMs ?? 0)}</div>
@@ -448,6 +478,27 @@ export function PracticeScreen() {
                 <div className="play-note finger-note">?</div>
                 <div className="muted">Play the next key — or tap Show me</div>
               </>
+            ) : simple && chord && shownStep ? (
+              <>
+                <div className="play-label">{previewEvent ? "Listen" : "Play together"}</div>
+                <div className="step-hands">
+                  {(["lh", "rh"] as const).map((side) => {
+                    const ns = shownStep.notes.filter((n) => n.hand === side).sort((a, b) => a.midi - b.midi);
+                    if (!ns.length) return null;
+                    return (
+                      <div key={side} className="step-hand">
+                        <span className="who">{side === "lh" ? "Left" : "Right"}</span>
+                        {ns.map((n) => (
+                          <span key={n.midi} className={`finger-chip f${n.finger}`}>
+                            {n.finger}
+                          </span>
+                        ))}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="muted">each gold key · its finger</div>
+              </>
             ) : simple ? (
               <>
                 <div className="play-label">{previewEvent ? "Listen" : shown ? handName(shown.hand) : "Play the gold key"}</div>
@@ -465,8 +516,8 @@ export function PracticeScreen() {
             )}
             {!finished && !hidden && memoryLevel < 2 && (
               <div className="upcoming">
-                {next && <span className="soon">then {simple ? fingerWord(nextAdvice) || "·" : next.pitches.join(" ")}</span>}
-                {next2 && <span>then {simple ? fingerWord(next2Advice) || "·" : next2.pitches.join(" ")}</span>}
+                {next && <span className="soon">then {simple ? stepWord(plan[(snap?.cursor ?? 0) + 1]) || "·" : next.pitches.join(" ")}</span>}
+                {next2 && <span>then {simple ? stepWord(plan[(snap?.cursor ?? 0) + 2]) || "·" : next2.pitches.join(" ")}</span>}
               </div>
             )}
             <div className="progress-track">
@@ -580,6 +631,9 @@ export function PracticeScreen() {
       </div>
 
       <p className="muted keyboard-hint">
+        {twoHanded && typeof window !== "undefined" && window.innerWidth < 520 && window.innerWidth < window.innerHeight
+          ? "Both hands are shown. Turn your phone sideways for bigger keys. "
+          : ""}
         {previewEvent
           ? "Watch the hand — then play it back."
           : hidden
@@ -591,10 +645,11 @@ export function PracticeScreen() {
         targets={targets}
         upcoming={previewEvent || finished || hidden || memoryLevel >= 1 ? [] : (next?.expectedMidi ?? [])}
         showNames={!simple}
-        hand={hand}
+        hands={handPoses}
+        keepVisible={keepVisible}
         hitMidi={snap?.hitMidi ?? null}
         missMidi={snap?.missMidi ?? null}
-        fingerings={advice ? { [advice.midi]: advice.finger } : {}}
+        fingerings={Object.fromEntries((step?.notes ?? []).map((n) => [n.midi, n.finger]))}
         shape={advice?.shape ?? {}}
         showFingering={settings.showFingering !== false && !hidden}
         memoryLevel={memoryLevel}

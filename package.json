@@ -22,6 +22,7 @@
     "build:app": "npm run build:app -w @piano-helper/desktop",
     "build:web": "npm run build -w @piano-helper/web",
     "test": "npm run test -w @piano-helper/shared && npm run test -w @piano-helper/bridge",
+    "test:live": "npm run test:live -w @piano-helper/bridge --",
     "piano-helper": "npm run start -w @piano-helper/bridge"
   },
   "allowScripts": {

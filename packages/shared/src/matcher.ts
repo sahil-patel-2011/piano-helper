@@ -1,10 +1,20 @@
+import { chordHeard, type Spectrum } from "./spectrum.js";
+
 export type HeardNote = {
   midi: number;
   centsError: number;
   rms: number;
   source: "mic" | "midi";
   t: number;
+  /**
+   * "strike": the mic heard a key go down and took a spectrum, whatever the pitch tracker made
+   * of it. Used to check chords and both-hand steps, which one pitch can't describe.
+   */
+  kind?: "pitch" | "strike";
+  spectrum?: Spectrum;
 };
+
+const isPitch = (h: HeardNote) => h.kind !== "strike";
 
 export function notesInWindow(heard: HeardNote[], now: number, windowMs: number): HeardNote[] {
   return heard.filter((h) => now - h.t <= windowMs);
@@ -32,9 +42,12 @@ export function expectedHit(
 ): boolean {
   if (expectedMidi.length === 0) return false;
   const hasMidi = recent.some((h) => h.source === "midi");
-  const heard = (target: number) => recent.some((h) => matches(h, target, matchWindowCents, shiftFor));
+  const heard = (target: number) => recent.some((h) => isPitch(h) && matches(h, target, matchWindowCents, shiftFor));
   if (hasMidi) return expectedMidi.every(heard);
   if (expectedMidi.length === 1) return heard(expectedMidi[0]);
+  // Several keys at once: check the spectrum of the latest strike for each expected key.
+  const strike = [...recent].reverse().find((h) => h.kind === "strike" && h.spectrum);
+  if (strike?.spectrum) return chordHeard(strike.spectrum, expectedMidi);
   // A mic pitch tracker hears one note of a chord, and often in the wrong octave:
   // C-E-G together repeats at a low C. Any chord tone's name, any octave, proves the hand landed.
   return recent.some((h) => {
@@ -51,7 +64,10 @@ export function unexpectedPitch(
   matchWindowCents = 50,
   shiftFor?: ShiftFor,
 ): number | null {
+  // One pitch can't describe a chord, so the mic never calls a chord step wrong; it just waits for it.
+  if (expectedMidi.length > 1 && !recent.some((h) => h.source === "midi")) return null;
   for (const h of recent) {
+    if (!isPitch(h)) continue;
     if (expectedMidi.some((t) => matches(h, t, matchWindowCents, shiftFor))) continue;
     return Math.round(h.midi);
   }

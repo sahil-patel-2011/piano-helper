@@ -11,6 +11,12 @@ It prints a localhost URL, a phone URL with `?key=…`, and a QR code. Phones ne
 
 Score photos uploaded from any device are read on this computer by `claude -p` or `codex exec` (whichever is installed; choose in Settings → Score reader). API-key env vars are stripped so the signed-in subscription is used.
 
+## AI boundary
+
+The only AI call in the app is `readScore` (`packages/bridge/src/studio/engines.ts`), run once per new photo. Its raw answer, the parsed lesson and a `reading.json` are kept in `%APPDATA%\Piano Helper\imports\<id>\`. `studio/photos.json` maps each photo's SHA-256 to its lesson, so a repeat upload never calls the AI. Everything else (practice, Learn mode, tempo following, fingering display, mic scoring) is deterministic code. Keep it that way.
+
+Tests: `npm test` (stand-in CLIs) and `npm run test:live` (real subscription, two reads).
+
 ## When the user gives you a sheet-music photo directly
 
 Read it yourself and produce lesson JSON (schema: `packages/shared/src/omr-prompt.ts`, every event needs `hand` and `fingering`). Then either:

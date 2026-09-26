@@ -14,10 +14,17 @@ export function createMetronome(): MetroHandle {
   let volume = 0;
   let beats = 4;
   let beat = 0;
+  let tick: (() => void) | null = null;
   const handle: MetroHandle = {
     onBeat: undefined,
     setBpm(next) {
+      // Follow the player live: re-time a running click without restarting the bar.
+      if (Math.abs(next - bpm) < 1) return;
       bpm = next;
+      if (timer && tick) {
+        window.clearInterval(timer);
+        timer = window.setInterval(tick, (60 / bpm) * 1000);
+      }
     },
     setVolume(v) {
       volume = v;
@@ -46,12 +53,14 @@ export function createMetronome(): MetroHandle {
         handle.onBeat?.(beat);
         beat = (beat + 1) % beats;
       };
+      tick = click;
       click();
       timer = window.setInterval(click, (60 / bpm) * 1000);
     },
     stop() {
       if (timer) window.clearInterval(timer);
       timer = null;
+      tick = null;
       beat = 0;
       void ctx?.close();
       ctx = null;

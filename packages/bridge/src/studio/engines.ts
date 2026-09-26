@@ -118,8 +118,8 @@ function studioPrompt(imagePath: string, settings: AppSettings, repair?: string)
       "Work carefully before you answer:",
       "1. Find the clef of each staff, the key signature (apply its sharps/flats to every affected note) and the time signature.",
       "2. Read bar by bar. Check that the durations in every bar add up to the time signature; re-read any bar that does not.",
-      "3. Treble staff is the right hand, bass staff the left hand. Keep chords to the notes a beginner can actually play.",
-      "4. Choose fingering for someone who memorises by hand position and never reads the music: few hand shifts, the same fingers for repeated patterns, no thumb on black keys.",
+      "3. Treble staff is the right hand, bass staff the left hand. Transcribe everything written for both hands (full chords, held bass notes). Give notes that sound together the same beat so they are played together.",
+      "4. Choose fingering for EVERY note, as a piano teacher would for this piece: plan each hand's positions ahead, few hand shifts, the same fingers for repeated patterns, thumb-under/cross-over in runs, no thumb on black keys. The player memorises by hand position and never reads the music.",
       "5. Write `summary`: where each hand starts (e.g. 'Right thumb on middle C'). Write a short `tip` for every bar that helps remember it by feel or by comparison (e.g. 'Same as bar 1, then walk down'). Plain words, no note-reading jargon.",
       "Mark any note you are unsure of with uncertain: true rather than guessing silently.",
     ].join("\n"),
@@ -186,7 +186,15 @@ async function askCodex(bin: string, imagePath: string, settings: AppSettings, r
   return answer || res.out;
 }
 
-export async function readScore(imagePath: string, settings: AppSettings): Promise<{ lesson: Lesson; engine: EngineId }> {
+export type ScoreReading = {
+  lesson: Lesson;
+  engine: EngineId;
+  /** Everything the AI answered, verbatim (a second entry means it was asked to fix its JSON). */
+  raw: string[];
+};
+
+/** The only place the app talks to an AI: one photo in, one lesson out. */
+export async function readScore(imagePath: string, settings: AppSettings): Promise<ScoreReading> {
   const status = engineStatus(settings.omrEngine);
   const engine = status.active;
   if (!engine) {
@@ -202,10 +210,10 @@ export async function readScore(imagePath: string, settings: AppSettings): Promi
     try {
       const first = await ask(bin, imagePath, settings);
       try {
-        return { lesson: coerceLesson(extractJsonObject(first), source), engine: id };
+        return { lesson: coerceLesson(extractJsonObject(first), source), engine: id, raw: [first] };
       } catch {
         const second = await ask(bin, imagePath, settings, first);
-        return { lesson: coerceLesson(extractJsonObject(second), source), engine: id };
+        return { lesson: coerceLesson(extractJsonObject(second), source), engine: id, raw: [first, second] };
       }
     } catch (e) {
       lastError = e;
